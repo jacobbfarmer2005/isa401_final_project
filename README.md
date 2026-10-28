@@ -1,4 +1,4 @@
-# NCAA Recruitment Mapped
+# NCAA Recruitment: Mapped
 
 ISA 401 Final Project, Fall 2026, Team 6, Section B
 
