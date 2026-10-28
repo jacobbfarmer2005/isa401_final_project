@@ -1,14 +1,10 @@
-# [Project Title]
+# NCAA Recruitment Mapped
 
-ISA 401 Final Project, Fall 2026, Team [number], Section [A or B]
+ISA 401 Final Project, Fall 2026, Team 6, Section B
 
 <!--
 How to use this template (delete this comment block once your team is set up):
 
-1. One teammate clicks "Use this template" > "Create a new repository" on GitHub.
-   Owner: that teammate. Name: something descriptive (for example, ohio-housing-affordability).
-   Visibility: Public.
-2. That teammate opens Settings > Collaborators and adds every other team member.
 3. Every team member clones the new repository in GitHub Desktop (File > Clone repository)
    to M:\isa401\ and opens project.Rproj in RStudio.
 4. Replace every [bracketed] placeholder below. Keep the headings: they follow the
@@ -30,8 +26,9 @@ Never commit API keys. Keep them in a .Renviron file in this folder (already in 
 | Member | What I built | Portfolio project entry |
 |---|---|---|
 | [First Last] | [for example: the API pulls and the merge] | [https://USERNAME.github.io/portfolio/#...] |
-| [First Last] | [ ] | [ ] |
-| [First Last] | [ ] | [ ] |
+| Jacob Farmer | [ ] | https://jacobbfarmer2005.github.io/portfolio/ |
+| Peter Franz | [ ] | [ ] |
+| Dalton Kane | [ ] | https://djthork.github.io/portfolio/ |
 
 Each member adds this project to their own portfolio site, in their own words, with a link
 back to this repository and the dashboard, and updates the Skills section of their portfolio
