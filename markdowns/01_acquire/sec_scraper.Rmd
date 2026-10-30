@@ -1,0 +1,268 @@
+---
+title: "sec_scraper"
+author: "Jacob Farmer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Scraper
+```{r}
+school_names = c(
+  "auburntigers"    = "Auburn",
+  "floridagators"   = "Florida",
+  "georgiadogs"     = "Georgia",
+  "ukathletics"     = "Kentucky",
+  "lsusports"       = "LSU",
+  "olemisssports"   = "Ole Miss",
+  "hailstate"       = "Mississippi State",
+  "mutigers"        = "Missouri",
+  "soonersports"    = "Oklahoma",
+  "gamecocksonline" = "South Carolina",
+  "utsports"        = "Tennessee",
+  "texaslonghorns"  = "Texas",
+  "12thman"         = "Texas A&M",
+  "vucommodores"    = "Vanderbilt"
+)
+
+urls = c(
+  "https://georgiadogs.com/sports/football/roster",
+  "https://hailstate.com/sports/football/roster",
+  "https://soonersports.com/sports/football/roster",
+  "https://olemisssports.com/sports/football/roster",
+  "https://texaslonghorns.com/sports/football/roster",
+  "https://utsports.com/sports/football/roster",
+  "https://floridagators.com/sports/football/roster"
+  )
+
+roster_function = function(roster_url){
+  webpage = rvest::read_html(roster_url)
+  
+  # Get player cards first
+  webpage |> rvest::html_elements(".s-person-card") -> cards
+  
+  # Names
+  cards |> rvest::html_element("h3") |> rvest::html_text2() -> names
+  
+  # Position
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(1)") |> rvest::html_text2() -> position
+  position = stringr::str_remove(position, "Position ")
+  
+  # Year
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(2)") |> rvest::html_text2() -> year
+  year = stringr::str_remove(year, "Academic Year ")
+  
+  # Height
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(3)") |> rvest::html_text2() -> height
+  height = stringr::str_remove(height, "Height ")
+  
+  # Weight
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(4)") |> rvest::html_text2() -> weight
+  weight = stringr::str_remove(weight, "Weight ")
+  weight = stringr::str_remove(weight, " lbs")
+  
+  # Hometown
+  cards |> rvest::html_element(".s-person-card__content__person__location-item") |> rvest::html_text2() -> hometown
+  hometown = stringr::str_remove(hometown, "Hometown")
+  split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+  city  = stringr::str_squish(split_home[, 1])
+  state = stringr::str_squish(split_home[, 2])
+  
+  # Previous school
+  cards |> rvest::html_element(".s-person-card__content__person__previous-school-item") |> rvest::html_text2() -> prev_school
+  prev_school = stringr::str_squish(stringr::str_remove(prev_school, "^.*Previous School:"))
+  
+  # Current school
+  site = stringr::str_extract(roster_url, "(?<=://)[^.]+")
+  school = unname(school_names[site])
+  
+  # Make the data frame
+  df = data.frame(school = school, name = names, year = year, position = position,
+                  height = height, weight_lbs = weight,
+                  hometown_city = city, hometown_state = state,
+                  previous_school = prev_school)
+  
+  # Drop coach/staff cards (no listed position)
+  df = df[!is.na(df$position), ]
+  
+  return(df)
+}
+
+sec_df = data.frame()
+for (url in urls) {
+  df = roster_function(roster_url = url)
+  
+  sec_df = rbind(sec_df, df)
+  
+  Sys.sleep(2)
+}
+```
+```{r}
+urls2 = c(
+  "https://auburntigers.com/sports/football/roster",
+  "https://mutigers.com/sports/football/roster?view=list",
+  "https://12thman.com/sports/football/roster?view=list",
+  "https://vucommodores.com/sports/football/roster?view=list",
+  "https://lsusports.net/sports/fb/roster?view=list"
+)
+
+roster_function2 = function(roster_url){
+  webpage = rvest::read_html(roster_url)
+  
+  # Get player cards first
+  webpage |> rvest::html_elements(".roster-list-item") -> cards
+  
+  # Names
+  cards |> rvest::html_element(".roster-list-item__title") |> rvest::html_text2() -> names
+  
+  # Position
+  cards |> rvest::html_element(".roster-player-list-profile-field--position") |> rvest::html_text2() -> position
+  position = stringr::str_remove_all(position, "\\[|\\]")
+  
+  # Year
+  cards |> rvest::html_element(".roster-player-list-profile-field--class-level") |> rvest::html_text2() -> year
+  year = stringr::str_remove_all(year, "\\[|\\]")
+  
+  # Height
+  cards |> rvest::html_element(".roster-player-list-profile-field--height > span") |> rvest::html_text2() -> height
+  height = stringr::str_remove(height, "Height ")
+  
+  # Weight
+  cards |> rvest::html_element(".roster-player-list-profile-field--weight") |> rvest::html_text2() -> weight
+  weight = stringr::str_remove_all(weight, "\\[|\\]")
+  weight = stringr::str_remove(weight, " lbs")
+  
+  # Hometown
+  cards |> rvest::html_element(".roster-player-list-profile-field--hometown") |> rvest::html_text2() -> hometown
+  hometown = stringr::str_remove(hometown, "Hometown")
+  hometown = stringr::str_remove_all(hometown, "\\[|\\]")
+  split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+  city  = stringr::str_squish(split_home[, 1])
+  state = stringr::str_squish(split_home[, 2])
+  
+  # Previous school (NA for players who didn't transfer)
+  cards |> rvest::html_element(".roster-player-list-profile-field--previous-school") |> rvest::html_text2() -> prev_school
+  prev_school = stringr::str_remove_all(prev_school, "\\[|\\]")
+  
+  # Current school
+  site = stringr::str_extract(roster_url, "(?<=://)[^.]+")
+  school = unname(school_names[site])
+  
+  # Make the data frame
+  df = data.frame(school = school, name = names, year = year, position = position,
+                  height = height, weight_lbs = weight,
+                  hometown_city = city, hometown_state = state,
+                  previous_school = prev_school)
+  
+  # Drop coach/staff cards (no listed position)
+  df = df[!is.na(df$position), ]
+  
+  return(df)
+}
+
+df = data.frame()
+for (url in urls2) {
+  df = roster_function2(roster_url = url)
+  
+  sec_df = rbind(sec_df, df)
+  
+  Sys.sleep(2)
+}
+```
+```{r}
+# For University of Kentucky
+
+uk_url = paste0("https://ukathletics.com/sports/football/roster/")
+webpage = rvest::read_html(uk_url)
+
+# Names
+webpage |> rvest::html_elements("td:nth-child(2) > a") |> rvest::html_text2() -> names
+
+# Position
+webpage |> rvest::html_elements("td:nth-child(3)") |> rvest::html_text2() -> position
+position = position[1:111]
+
+# Year
+webpage |> rvest::html_elements("td:nth-child(6)") |> rvest::html_text2() -> year
+
+# Height
+webpage |> rvest::html_elements("td:nth-child(4)") |> rvest::html_text2() -> height
+
+# Weight
+webpage |> rvest::html_elements("td:nth-child(5)") |> rvest::html_text2() -> weight
+weight = stringr::str_remove(weight, " lbs.")
+
+# Hometown
+webpage |> rvest::html_elements("td:nth-child(7)") |> rvest::html_text2() -> hometown
+split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+city  = stringr::str_squish(split_home[, 1])
+state = stringr::str_squish(split_home[, 2])
+
+# Previous school
+webpage |> rvest::html_elements("td:nth-child(9)") |> rvest::html_text2() -> prev_school
+prev_school = stringr::str_squish(prev_school)
+
+# Current school
+school = "Kentucky"
+
+# Make the data frame
+df = data.frame(school = school, name = names, year = year, position = position,
+                height = height, weight_lbs = weight,
+                hometown_city = city, hometown_state = state,
+                previous_school = prev_school)
+
+sec_df = rbind(sec_df, df)
+```
+```{r}
+# For University of South Carolina
+
+south_carolina_url = paste0("https://gamecocksonline.com/sports/football/roster/")
+webpage = rvest::read_html(south_carolina_url)
+
+# Names
+webpage |> rvest::html_elements("h3 > div > a") |> rvest::html_text2() -> names
+names = names[1:112]
+
+# Position
+webpage |> rvest::html_elements("div > span.position") |> rvest::html_text2() -> position
+position = position[1:112]
+
+# Height, weight, and year all come from the same field
+webpage |> rvest::html_elements("div > p.info") |> rvest::html_text2() -> info
+
+split_info = stringr::str_split_fixed(info, "\\s*/\\s*", n = 3)
+
+# Height
+height = stringr::str_squish(split_info[, 1])
+
+# Weight
+weight = stringr::str_squish(split_info[, 2])
+weight = stringr::str_remove(weight, " lbs")
+
+# Year
+year = stringr::str_squish(split_info[, 3])
+
+# Hometown
+webpage |> rvest::html_elements("td.hometown") |> rvest::html_text2() -> hometown
+split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+city  = stringr::str_squish(split_home[, 1])
+state = stringr::str_squish(split_home[, 2])
+
+# Previous school
+webpage |> rvest::html_elements("td.previousschool") |> rvest::html_text2() -> prev_school
+prev_school = stringr::str_squish(prev_school)
+
+# Current school
+school = "South Carolina"
+
+# Make the data frame
+df = data.frame(school = school, name = names, year = year, position = position,
+                height = height, weight_lbs = weight,
+                hometown_city = city, hometown_state = state,
+                previous_school = prev_school)
+
+sec_df = rbind(sec_df, df)
+```
