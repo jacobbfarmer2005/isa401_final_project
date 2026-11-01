@@ -1,0 +1,113 @@
+---
+title: "fbs_independents"
+author: "Jacob Farmer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Scraper
+```{r}
+# For Notre Dame
+
+nd_url = paste0("https://fightingirish.com/sports/football/roster")
+webpage = rvest::read_html(nd_url)
+
+# Names
+webpage |> rvest::html_elements("th > div > a > span") |> rvest::html_text2() -> names
+names = names[1:111]
+
+# Position
+webpage |> rvest::html_elements("td:nth-child(3) > span") |> rvest::html_text2() -> position
+
+# Year
+webpage |> rvest::html_elements("td:nth-child(6)") |> rvest::html_text2() -> year
+
+# Height
+webpage |> rvest::html_elements("td:nth-child(4) > span") |> rvest::html_text2() -> height
+
+# Weight
+webpage |> rvest::html_elements("td:nth-child(5) > span") |> rvest::html_text2() -> weight
+weight = stringr::str_remove(weight, " lbs")
+
+# Hometown
+webpage |> rvest::html_elements("td:nth-child(7)") |> rvest::html_text2() -> hometown
+split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+city  = stringr::str_squish(split_home[, 1])
+state = stringr::str_squish(split_home[, 2])
+
+# Previous school
+webpage |> rvest::html_elements("td:nth-child(8)") |> rvest::html_text2() -> prev_school
+prev_school = stringr::str_extract(prev_school, "(?<=/).*$")
+prev_school = stringr::str_squish(prev_school)
+
+# Current school
+school = "Notre Dame"
+
+# Make the data frame
+df = data.frame(school = school, name = names, year = year, position = position,
+                height = height, weight_lbs = weight,
+                hometown_city = city, hometown_state = state,
+                previous_school = prev_school)
+
+fbs_independent_df = data.frame()
+fbs_independent_df = rbind(fbs_independent_df, df)
+```
+```{r}
+# For UConn
+
+uconn_url = paste0("https://uconnhuskies.com/sports/football/roster")
+webpage = rvest::read_html(uconn_url)
+
+  # Get player cards first
+  webpage |> rvest::html_elements(".s-person-card") -> cards
+  
+  # Names
+  cards |> rvest::html_element("h3") |> rvest::html_text2() -> names
+  
+  # Position
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(1)") |> rvest::html_text2() -> position
+  position = stringr::str_remove(position, "Position ")
+  
+  # Year
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(2)") |> rvest::html_text2() -> year
+  year = stringr::str_remove(year, "Academic Year ")
+  
+  # Height
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(3)") |> rvest::html_text2() -> height
+  height = stringr::str_remove(height, "Height ")
+  
+  # Weight
+  cards |> rvest::html_element(".s-person-details__bio-stats-item:nth-child(4)") |> rvest::html_text2() -> weight
+  weight = stringr::str_remove(weight, "Weight ")
+  weight = stringr::str_remove(weight, " lbs")
+  
+  # Hometown
+  cards |> rvest::html_element(".s-person-card__content__person__location-item") |> rvest::html_text2() -> hometown
+  hometown = stringr::str_remove(hometown, "Hometown")
+  split_home = stringr::str_split_fixed(hometown, ",", n = 2)
+  city  = stringr::str_squish(split_home[, 1])
+  state = stringr::str_squish(split_home[, 2])
+  
+  # Previous school
+  cards |> rvest::html_element(".s-person-card__content__person__previous-school-item") |> rvest::html_text2() -> prev_school
+  prev_school = stringr::str_squish(prev_school)
+  prev_school = stringr::str_remove(prev_school, "Previous School Last Team: ")
+  
+  # Current school
+  school = "UConn (University of Connecticut"
+  
+  # Make the data frame
+  df = data.frame(school = school, name = names, year = year, position = position,
+                  height = height, weight_lbs = weight,
+                  hometown_city = city, hometown_state = state,
+                  previous_school = prev_school)
+  
+  # Drop coach/staff cards (no listed position)
+  df = df[!is.na(df$position), ]
+  
+  fbs_independent_df = rbind(fbs_independent_df, df)
+```
