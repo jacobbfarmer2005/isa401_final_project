@@ -9,22 +9,150 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+```{r setup}
+install.packages(c(
+  "tidycensus",
+  "tidyverse",
+  "sf",
+  "tigris"
+))
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+library(tidycensus)
+library(tidyverse)
+library(sf)
+library(tigris)
 ```
 
-## Including Plots
+```{r connection test}
 
-You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# ohio process testing
+ohio_census <- get_acs(
+  geography = "place", # individual places, not counties/states (unless we want to do that)
+  variables = c(
+    median_income = "B19013_001",
+    population = "B01003_001",
+    poverty_total = "B17001_001", # total number of people in poverty in place
+    poverty_count = "B17001_002" # people below federal poverty threshold
+  ),
+  state = "OH",
+  year = 2024, # newest data from 2024
+  survey = "acs5", # this is the ACS 5-year estimates
+    # important b/c it includes smaller communities not covered by ACS1
+  output = "wide"
+)
+
+# calculating the poverty rate
+ohio_census <- ohio_census %>%
+  mutate(
+    poverty_rate = if_else(
+      poverty_totalE > 0,
+      poverty_countE / poverty_totalE * 100,
+      NA_real_
+    )
+  )
+
+head(ohio_census)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r adding_lat_long_ohio}
+options(tigris_use_cache = TRUE)
+
+# ohio geopgrahic boundaries
+ohio_places <- places(
+  state = "OH",
+  year = 2024,
+  cb = TRUE
+)
+head(ohio_places)
+
+```
+
+```{r generate_lat_long}
+# generate latitude/longitude
+ohio_places_projected <- st_transform(
+  ohio_places,
+  crs = 5070
+)
+ohio_points <- st_point_on_surface(
+  ohio_places_projected
+)
+ohio_points <- st_transform(
+  ohio_points,
+  crs = 4326
+)
+
+coordinates <- st_coordinates(ohio_points)
+
+ohio_points$longitude <- coordinates[, "X"]
+ohio_points$latitude <- coordinates[, "Y"]
+
+ohio_coordinates <- ohio_points %>%
+  st_drop_geometry() %>%
+  select(GEOID, longitude, latitude)
+
+head(ohio_coordinates)
+```
+
+
+```{r ohio_merge}
+ohio_census_geo <- ohio_census %>%
+  left_join(
+    ohio_coordinates,
+    by = "GEOID"
+  )
+
+head(ohio_census_geo)
+
+View(ohio_census_geo)
+
+dim(ohio_census_geo)
+```
+
+```{r validate_merge}
+sum(
+  is.na(ohio_census_geo$latitude) |
+  is.na(ohio_census_geo$longitude)
+)
+
+sum(duplicated(ohio_census_geo$GEOID))
+
+nrow(ohio_census)
+nrow(ohio_census_geo)
+
+ohio_census_geo %>%
+  filter(
+    grepl(
+      "Oxford|Toledo|Cleveland|Columbus",
+      NAME
+    )
+  ) %>%
+  select(
+    NAME,
+    median_incomeE,
+    populationE,
+    poverty_rate,
+    latitude,
+    longitude
+  )
+```
+
+```{r visualize_ohio}
+ggplot(
+  ohio_census_geo,
+  aes(x = longitude, y = latitude)
+) +
+  geom_point(
+    alpha = 0.5,
+    size = 1
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "Geographic Distribution of Ohio Census Places",
+    subtitle = "2024 Census geographic boundaries",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+```
+
