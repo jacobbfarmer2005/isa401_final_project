@@ -23,6 +23,8 @@ library(sf)
 library(tigris)
 ```
 
+
+### TESTING WITH OHIO
 ```{r connection test}
 
 
@@ -154,5 +156,222 @@ ggplot(
     y = "Latitude"
   ) +
   theme_minimal()
+```
+
+
+### NATIONWIDE
+```{r national_data}
+# ============================================================
+# NATIONWIDE CENSUS DATA ACQUISITION
+# ============================================================
+
+library(tidycensus)
+library(tidyverse)
+library(sf)
+library(tigris)
+
+# All 50 U.S. states plus Washington, D.C.
+states <- c(state.abb, "DC")
+
+# Create a folder for saved Census data
+dir.create(
+  "data/census",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# Retrieve ACS data one state at a time
+for (st in states) {
+
+  file_path <- file.path(
+    "data/census",
+    paste0("acs_", st, "_2024.rds")
+  )
+
+  # Skip states that have already been downloaded
+  if (file.exists(file_path)) {
+    message("Already downloaded: ", st)
+    next
+  }
+
+  message("Downloading Census data for: ", st)
+
+  state_data <- get_acs(
+    geography = "place",
+    variables = c(
+      median_income = "B19013_001",
+      population = "B01003_001",
+      poverty_total = "B17001_001",
+      poverty_count = "B17001_002"
+    ),
+    state = st,
+    year = 2024,
+    survey = "acs5",
+    output = "wide"
+  )
+
+  # Calculate poverty rate and add state abbreviation
+  state_data <- state_data %>%
+    mutate(
+      state_abbr = st,
+      poverty_rate = if_else(
+        poverty_totalE > 0,
+        poverty_countE / poverty_totalE * 100,
+        NA_real_
+      )
+    )
+
+  # Save the state's data
+  saveRDS(state_data, file_path)
+
+  # Brief pause between Census API requests
+  Sys.sleep(1)
+}
+
+# Combine all downloaded states into one dataset
+national_census <- purrr::map_dfr(
+  states,
+  function(st) {
+    readRDS(
+      file.path(
+        "data/census",
+        paste0("acs_", st, "_2024.rds")
+      )
+    )
+  }
+)
+
+# Inspect the combined dataset
+dim(national_census)
+
+head(national_census)
+
+# Count Census places by state
+national_census %>%
+  count(state_abbr, sort = TRUE)
+```
+
+
+```{r national_coordinates}
+options(tigris_use_cache = TRUE)
+
+# Download Census place boundaries nationwide
+national_places <- tigris::places(
+  state = NULL,
+  year = 2024,
+  cb = TRUE
+)
+
+# Transform boundaries to projected coordinates
+national_places_projected <- st_transform(
+  national_places,
+  crs = 5070
+)
+
+# Generate representative points within each place
+national_points <- st_point_on_surface(
+  national_places_projected
+)
+
+# Convert points back to latitude/longitude
+national_points <- st_transform(
+  national_points,
+  crs = 4326
+)
+
+# Extract coordinate values
+coordinates <- st_coordinates(national_points)
+
+national_points$longitude <- coordinates[, "X"]
+national_points$latitude <- coordinates[, "Y"]
+
+# Keep only the geographic identifiers and coordinates
+national_coordinates <- national_points %>%
+  st_drop_geometry() %>%
+  select(GEOID, longitude, latitude)
+
+# Inspect the results
+dim(national_coordinates)
+
+head(national_coordinates)
+
+# Save geographic coordinates
+saveRDS(
+  national_coordinates,
+  "data/census/national_coordinates_2024.rds"
+)
+```
+
+```{r national_merge}
+national_census_geo <- national_census %>%
+  left_join(
+    national_coordinates,
+    by = "GEOID"
+  )
+
+# Inspect the merged dataset
+dim(national_census_geo)
+
+head(national_census_geo)
+
+View(national_census_geo)
+```
+
+```{r national_validation}
+
+# Total number of Census places
+nrow(national_census_geo)
+
+# Number of states and DC represented
+n_distinct(national_census_geo$state_abbr)
+
+# Check for missing geographic coordinates
+sum(
+  is.na(national_census_geo$latitude) |
+  is.na(national_census_geo$longitude)
+)
+
+# Check for duplicate Census GEOIDs
+sum(duplicated(national_census_geo$GEOID))
+
+# Verify row counts before and after merging
+nrow(national_census)
+nrow(national_census_geo)
+
+# Count missing median household income estimates
+sum(is.na(national_census_geo$median_incomeE))
+
+# Check for invalid poverty rates
+national_census_geo %>%
+  filter(
+    !is.na(poverty_rate) &
+      (poverty_rate < 0 | poverty_rate > 100)
+  )
+
+# Inspect state coverage
+national_census_geo %>%
+  count(state_abbr, sort = TRUE)
+```
+
+```{r more_validation}
+
+validation_summary <- national_census_geo %>%
+  summarise(
+    total_places = n(),
+    states = n_distinct(state_abbr),
+    missing_coordinates = sum(
+      is.na(latitude) | is.na(longitude)
+    ),
+    missing_income = sum(is.na(median_incomeE)),
+    missing_population = sum(is.na(populationE)),
+    missing_poverty_rate = sum(is.na(poverty_rate)),
+    duplicate_geoids = sum(duplicated(GEOID)),
+    invalid_poverty_rates = sum(
+      poverty_rate < 0 | poverty_rate > 100,
+      na.rm = TRUE
+    )
+  )
+
+validation_summary
 ```
 
