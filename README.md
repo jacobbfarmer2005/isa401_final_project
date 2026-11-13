@@ -36,7 +36,7 @@ and of their `business_intelligence` README with skills they used in this projec
 
 ## The Question
 
-Which U.S. counties produce the most FBS players per capita, and which community characteristics (income, population density, education, poverty rate) best explain the differences?
+Which U.S. counties produce the most FBS players per capita, and which community characteristics (income, population density, education, poverty rate, university proximity) best explain the differences?
 
 We are interested in how player development is concentrated across the country with NIL contributions impacting university athletics and recruitment. Unlike existing recruiting rankings our analysis combines scraped rosters for every FBS team with Census demographics to measure talent production at the community level, gaining a more holistic view of player development and it's potential causes.
 ## Data Sources
