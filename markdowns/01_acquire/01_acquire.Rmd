@@ -10,15 +10,15 @@ output:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
-## Source 1: [name] ([web scraping / API / LLM extraction])
+## Source 1: [School Rosters] (Web Scraping)
 
 What one row is: [ ]
 
-## Source 2: [name]
+## Source 2: [American Community Survey] (API)
 
 What one row is: [ ]
 
-## Source 3: [name]
+## Source 3: [Collegefootballdata.com] (API)
 
 What one row is: [ ]
 
