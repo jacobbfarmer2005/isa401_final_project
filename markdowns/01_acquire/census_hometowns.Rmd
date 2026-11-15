@@ -355,23 +355,87 @@ national_census_geo %>%
 
 ```{r more_validation}
 
-validation_summary <- national_census_geo %>%
-  summarise(
-    total_places = n(),
-    states = n_distinct(state_abbr),
-    missing_coordinates = sum(
-      is.na(latitude) | is.na(longitude)
-    ),
-    missing_income = sum(is.na(median_incomeE)),
-    missing_population = sum(is.na(populationE)),
-    missing_poverty_rate = sum(is.na(poverty_rate)),
-    duplicate_geoids = sum(duplicated(GEOID)),
-    invalid_poverty_rates = sum(
-      poverty_rate < 0 | poverty_rate > 100,
-      na.rm = TRUE
-    )
+# Identify Census places with missing income
+missing_income_places <- national_census_geo %>%
+  filter(is.na(median_incomeE)) %>%
+  select(
+    GEOID,
+    NAME,
+    state_abbr,
+    populationE,
+    median_incomeE,
+    poverty_rate
   )
 
-validation_summary
+# Inspect some examples
+head(missing_income_places, 20)
+
+
+# Count missing income values by state
+national_census_geo %>%
+  group_by(state_abbr) %>%
+  summarise(
+    total_places = n(),
+    missing_income = sum(is.na(median_incomeE)),
+    missing_pct = round(
+      missing_income / total_places * 100,
+      2
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(missing_pct)) %>%
+  head(15)
+
+
+# Check whether missing income is concentrated
+# in communities with very small populations
+national_census_geo %>%
+  mutate(
+    income_available = !is.na(median_incomeE)
+  ) %>%
+  group_by(income_available) %>%
+  summarise(
+    communities = n(),
+    median_population = median(
+      populationE,
+      na.rm = TRUE
+    ),
+    mean_population = mean(
+      populationE,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+```
+
+
+
+### Saving everything
+
+```{r save_files}
+
+# Save nationwide Census data as CSV
+write_csv(
+  national_census_geo,
+  "data/census/national_census_geo_2024.csv"
+)
+
+# Save as an RDS file to preserve R data types
+saveRDS(
+  national_census_geo,
+  "data/census/national_census_geo_2024.rds"
+)
+
+# Save missing income records for documentation
+write_csv(
+  missing_income_places,
+  "data/census/missing_income_places_2024.csv"
+)
+
+# Save nationwide validation summary
+write_csv(
+  validation_summary,
+  "data/census/census_validation_summary_2024.csv"
+)
 ```
 
