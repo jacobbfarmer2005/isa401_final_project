@@ -1,0 +1,100 @@
+---
+title: "CollegeFootballData"
+author: "Dalton Kane"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    sections: true
+    df_print: paged
+    code_folding: show
+    theme: readable
+    number_sections: true
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(readxl, tidyverse, fpp2,httr2,jsonlite,robots.txt)
+```
+
+
+
+```{r}
+get_cfbd_data <- function(endpoint, query_params = list()) {
+  base_url <- "https://api.collegefootballdata.com"
+  api_key <- Sys.getenv("CFBD_API_KEY")
+  
+  if (api_key == "") {
+    stop("CFBD_API_KEY environment variable is not set. Check your .Renviron.")
+  }
+  
+  req <- request(paste0(base_url, endpoint)) %>%
+    req_headers(
+      "Authorization" = paste("Bearer", api_key),
+      "Accept" = "application/json"
+    ) %>%
+    req_url_query(!!!query_params) %>%
+    req_retry(max_tries = 3, backoff = ~ 2) # Automatically retries if rate-limited or dropped
+  
+  resp <- req_perform(req)
+  
+  # Parse JSON into a flat data frame automatically
+  resp_body_json(resp, simplifyVector = TRUE)
+}
+```
+
+```{r}
+target_years <- c(2024, 2025)
+
+# 1. TEAMS DATA
+# Pulls core team info, FBS lists, and venue details
+teams_fbs <- get_cfbd_data("/teams/fbs", list(year = 2025))
+all_teams <- get_cfbd_data("/teams")
+
+# 2. ROSTER DATA (Iterated by year)
+# Pulls historical player rosters
+rosters_df <- map_dfr(target_years, ~ {
+  message(sprintf("Pulling rosters for %d...", .x))
+  
+  tryCatch({
+    get_cfbd_data("/roster", list(year = .x, classification = "fbs"))
+  }, error = function(e) {
+    warning(sprintf("Failed for year %d: %s", .x, e$message))
+    NULL
+  })
+})
+
+# 3. PLAYERS DATA 
+# Covers player search, usage, season overviews, and transfer portal entries
+transfer_portal <- map_dfr(target_years, ~ {
+  get_cfbd_data("/player/portal", list(year = .x))
+})
+
+player_usage <- map_dfr(target_years, ~ {
+  get_cfbd_data("/player/usage", list(year = .x))
+})
+
+# 4. RECRUITING DATA
+# Covers individual high school/JUCO recruits and team ranking summaries
+recruits_df <- map_dfr(target_years, ~ {
+  message(sprintf("Pulling recruiting class for %d...", .x))
+  get_cfbd_data("/recruiting/players", list(year = .x))
+})
+
+team_recruiting_rankings <- map_dfr(target_years, ~ {
+  get_cfbd_data("/recruiting/teams", list(year = .x))
+})
+
+team_recruiting_groups <- get_cfbd_data("/recruiting/groups", list(startYear = 2020, endYear = 2025))
+
+# 5. DRAFT DATA
+# Covers historical NFL draft picks (Note: The CFBD schema tracks draft history over time)
+draft_picks <- map_dfr(2023:2025, ~ {
+  get_cfbd_data("/draft/picks", list(year = .x))
+})
+```
+
