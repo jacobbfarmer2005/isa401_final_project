@@ -177,20 +177,13 @@ library(tigris)
 # All 50 U.S. states plus Washington, D.C.
 states <- c(state.abb, "DC")
 
-# Create a folder for saved Census data
-dir.create(
-  "data/census",
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
 # Retrieve ACS data one state at a time
 for (st in states) {
 
   file_path <- file.path(
-    "data/census",
-    paste0("acs_", st, "_2024.rds")
-  )
+  census_dir,
+  paste0("acs_", st, "_2024.rds")
+)
 
   # Skip states that have already been downloaded
   if (file.exists(file_path)) {
@@ -238,7 +231,7 @@ national_census <- purrr::map_dfr(
   function(st) {
     readRDS(
       file.path(
-        "data/census",
+        census_dir,
         paste0("acs_", st, "_2024.rds")
       )
     )
@@ -465,7 +458,7 @@ census_value_issues <- national_census_geo %>%
 
 write_csv(
   census_value_issues,
-  "data/census/census_value_issues_2024.csv"
+  file.path(census_dir, "census_value_issues_2024.csv")
 )
 
 nrow(census_value_issues)
@@ -594,8 +587,6 @@ duplicate_details <- national_census_match %>%
   arrange(state_clean, city_clean)
 
 duplicate_details
-
-View(duplicate_details)
 ```
 
 ```{r duplicate_solve}
@@ -640,36 +631,37 @@ sum(
 # Save nationwide Census data as CSV
 write_csv(
   national_census_geo,
-  "data/census/national_census_geo_2024.csv"
+  file.path(census_dir, "national_census_geo_2024.csv")
 )
 
-# Save as an RDS file to preserve R data types
+# Save nationwide Census data as RDS
 saveRDS(
   national_census_geo,
-  "data/census/national_census_geo_2024.rds"
+  file.path(census_dir, "national_census_geo_2024.rds")
 )
 
-# Save missing income records for documentation
+# Save missing-income records
 write_csv(
   missing_income_places,
-  "data/census/missing_income_places_2024.csv"
+  file.path(census_dir, "missing_income_places_2024.csv")
 )
 
-# Save nationwide validation summary
+# Save validation summary
 write_csv(
   validation_summary,
-  "data/census/census_validation_summary_2024.csv"
+  file.path(census_dir, "census_validation_summary_2024.csv")
 )
 
-# duplicate solutions
+# Save Census places with unique matching keys
 write_csv(
   census_unique,
-  "data/census/census_unique_2024.csv"
+  file.path(census_dir, "census_unique_2024.csv")
 )
 
+# Save ambiguous Census matching records
 write_csv(
   census_ambiguous,
-  "data/census/census_ambiguous_2024.csv"
+  file.path(census_dir, "census_ambiguous_2024.csv")
 )
 ```
 
