@@ -686,15 +686,6 @@ dplyr::glimpse(player_season_stats)
 Write each source to `../data/raw/`.
 
 ```{r}
-dir.create("../data/raw", recursive = TRUE, showWarnings = FALSE)
-# Flatten nested list-columns so write_csv() succeeds
-player_usage_flat <- player_usage %>%
-  unnest(usage, names_sep = "_")
 
-
-
-# Export clean CSVs
-write_csv(player_usage_flat, "../../data/raw/player_usage.csv")
-write_csv(player_season_stats, "../../data/raw/player_season_stats.csv")
 ```
 
