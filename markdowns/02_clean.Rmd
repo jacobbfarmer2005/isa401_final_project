@@ -11,13 +11,275 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
 ## Read the raw data
-
-Read from `../data/raw/`.
+```{r}
+fbs_rosters <- readr::read_csv("../data/raw/fbs_rosters.csv")
+#Source 2
+# Source 3
+```
 
 ## Clean each source
 
-Types, formats, missing values, duplicates.
+```{r}
+fbs_rosters_raw = readr::read_csv("../data/raw/fbs_rosters.csv", show_col_types = FALSE)
+
+# ============================================================================
+# Lookup tables
+# ============================================================================
+
+# ---- Positions: every abbreviation / variant -> one spelled-out name --------
+# Keys are UPPERCASE. Alternate names for the same position are merged
+# (OL / Offensive Line / Offensive Linemen -> "Offensive Lineman"), but distinct
+# positions stay distinct (Defensive End vs. Defensive Lineman, etc.).
+position_lookup = c(
+  # Offense
+  "QB" = "Quarterback",            "QUARTERBACK" = "Quarterback",
+  "RB" = "Running Back",           "RUNNING BACK" = "Running Back",
+  "FB" = "Fullback",               "FULLBACK" = "Fullback",
+  "SB" = "Slotback",
+  "ATH" = "Athlete",
+  "WR" = "Wide Receiver",          "WIDE RECEIVER" = "Wide Receiver", "WIDE RECIEVER" = "Wide Receiver",
+  "SLOT" = "Slot Receiver",
+  "TE" = "Tight End",              "TIGHT END" = "Tight End",
+  "OL" = "Offensive Lineman",      "OFFENSIVE LINE" = "Offensive Lineman",
+  "OFFENSIVE LINEMAN" = "Offensive Lineman", "OFFENSIVE LINEMEN" = "Offensive Lineman",
+  "INTERIOR OFFENSIVE LINE" = "Interior Offensive Lineman",
+  "OT" = "Offensive Tackle",       "OFFENSIVE TACKLE" = "Offensive Tackle",
+  "OG" = "Offensive Guard",
+  "C" = "Center",                  "OC" = "Center",
+  # Defense
+  "DL" = "Defensive Lineman",      "DEFENSIVE LINE" = "Defensive Lineman",
+  "DEFENSIVE LINEMAN" = "Defensive Lineman", "DEFENSIVE LINEMEN" = "Defensive Lineman",
+  "DE" = "Defensive End",          "DEFENSIVE END" = "Defensive End",
+  "E" = "End",
+  "DT" = "Defensive Tackle",       "DEFENSIVE TACKLE" = "Defensive Tackle",
+  "NT" = "Nose Tackle",            "NG" = "Nose Tackle",            "NOSE" = "Nose Tackle",
+  "EDGE" = "Edge Rusher",          "ER" = "Edge Rusher",            "RUSH" = "Edge Rusher",
+  "J" = "Jack",                    "JACK" = "Jack",                 "JK" = "Jack",
+  "BAN" = "Bandit",                "BANDIT" = "Bandit",
+  "LB" = "Linebacker",             "LINEBACKER" = "Linebacker",
+  "OLB" = "Outside Linebacker",    "OUTSIDE LINEBACKER" = "Outside Linebacker",
+  "ILB" = "Inside Linebacker",     "INSIDE LINEBACKER" = "Inside Linebacker",
+  "MB" = "Money Backer",           "MONEY BACKER" = "Money Backer",
+  "DB" = "Defensive Back",         "DEFENSIVE BACK" = "Defensive Back",
+  "CB" = "Cornerback",             "CORNERBACK" = "Cornerback",
+  "S" = "Safety",                  "SAF" = "Safety",                "SAFETY" = "Safety",
+  "NB" = "Nickelback",             "N" = "Nickelback",              "NI" = "Nickelback",
+  "NIC" = "Nickelback",            "NICK" = "Nickelback",           "NK" = "Nickelback",
+  "NKL" = "Nickelback",
+  "STAR" = "Star",
+  "SPR" = "Spur",                  "SPUR" = "Spur",
+  "VIPER" = "Viper",
+  # Special teams
+  "K" = "Kicker",                  "KICKER" = "Kicker",             "PK" = "Kicker",
+  "PLACEKICKER" = "Kicker",        "PLACE KICKER" = "Kicker",
+  "P" = "Punter",                  "PUNTER" = "Punter",
+  "LS" = "Long Snapper",           "LONG SNAPPER" = "Long Snapper", "LONGSNAPPER" = "Long Snapper",
+  "SN" = "Long Snapper",           "SNP" = "Long Snapper",          "DS" = "Long Snapper",
+  "DEEP SNAPPER" = "Long Snapper"
+)
+
+# ---- US states / DC / territories -> postal code -----------------------------
+# Keys are lowercase letters only ("N.C." -> "nc", "W. Va." -> "wva", "O'ahu" -> "oahu")
+state_key = function(x) stringr::str_to_lower(stringr::str_remove_all(stringi::stri_trans_general(x, "Latin-ASCII"), "[^a-zA-Z]"))
+
+us_lookup = c(
+  setNames(c(state.abb, "DC"), state_key(c(state.name, "District of Columbia"))),   # full names
+  setNames(c(state.abb, "DC"), stringr::str_to_lower(c(state.abb, "DC"))),         # postal codes
+  # AP-style and other abbreviations found in the data
+  "ala" = "AL", "ariz" = "AZ", "ark" = "AR", "cal" = "CA", "cali" = "CA", "calif" = "CA",
+  "colo" = "CO", "conn" = "CT", "del" = "DE", "fla" = "FL", "ill" = "IL", "ind" = "IN",
+  "kan" = "KS", "kans" = "KS", "mass" = "MA", "mich" = "MI", "minn" = "MN", "miss" = "MS",
+  "mis" = "MO",                                     # only occurrence: Saint Peters, Mo.
+  "mont" = "MT", "neb" = "NE", "nev" = "NV", "okla" = "OK", "ore" = "OR", "penn" = "PA",
+  "tenn" = "TN", "tex" = "TX", "texa" = "TX", "wash" = "WA", "wis" = "WI", "wisc" = "WI",
+  "wva" = "WV", "wyo" = "WY", "washingtondc" = "DC",
+  "oahu" = "HI", "maui" = "HI",                     # Hawaiian islands listed instead of state
+  "americansamoa" = "AS", "americansamoatuala" = "AS", "northernmarianaislands" = "MP"
+)
+
+# ---- Non-US provinces/states -> full name and country ------------------------
+province_lookup = tibble::tribble(
+  ~key,               ~province,           ~country,
+  "ontario",          "Ontario",           "Canada",
+  "ont",              "Ontario",           "Canada",
+  "quebec",           "Quebec",            "Canada",
+  "alberta",          "Alberta",           "Canada",
+  "britishcolumbia",  "British Columbia",  "Canada",
+  "bc",               "British Columbia",  "Canada",
+  "manitoba",         "Manitoba",          "Canada",
+  "novascotia",       "Nova Scotia",       "Canada",
+  "victoria",         "Victoria",          "Australia",
+  "vic",              "Victoria",          "Australia",
+  "southaustralia",   "South Australia",   "Australia",
+  "westernaustralia", "Western Australia", "Australia",
+  "queensland",       "Queensland",        "Australia",
+  "newsouthwales",    "New South Wales",   "Australia",
+  "grandbahama",      "Grand Bahama",      "Bahamas",
+  "savaii",           "Savai'i",           "Samoa",
+  "bavaria",          "Bavaria",           "Germany"
+)
+
+# ---- Countries listed in place of a state -----------------------------------
+country_lookup = c(
+  "australia" = "Australia", "aus" = "Australia", "au" = "Australia", "austrailia" = "Australia",
+  "germany" = "Germany", "ger" = "Germany",
+  "england" = "England", "ireland" = "Ireland", "northernireland" = "Northern Ireland",
+  "unitedkingdom" = "United Kingdom", "uk" = "United Kingdom",
+  "canada" = "Canada", "can" = "Canada",
+  "netherlands" = "Netherlands", "thenetherlands" = "Netherlands",
+  "newzealand" = "New Zealand", "sweden" = "Sweden", "nigeria" = "Nigeria", "finland" = "Finland",
+  "ghana" = "Ghana", "mexico" = "Mexico", "bahamas" = "Bahamas", "tonga" = "Tonga",
+  "france" = "France", "italy" = "Italy", "austria" = "Austria", "spain" = "Spain",
+  "brazil" = "Brazil", "senegal" = "Senegal", "haiti" = "Haiti", "denmark" = "Denmark",
+  "belgium" = "Belgium", "israel" = "Israel", "serbia" = "Serbia", "china" = "China",
+  "russia" = "Russia", "estonia" = "Estonia", "samoa" = "Samoa",
+  "drofthecongo" = "Democratic Republic of the Congo",
+  "democraticrepublicofcongo" = "Democratic Republic of the Congo",
+  "democraticrepublicofthecongo" = "Democratic Republic of the Congo"
+)
+
+# ============================================================================
+# Cleaning functions
+# ============================================================================
+
+# Year -> "1".."8" by eligibility year (redshirt status ignored: R-Fr. -> "1")
+clean_year = function(x) {
+  s = stringr::str_to_lower(x)
+  from_digit = stringr::str_extract(s, "[1-8](?=st|nd|rd|th)")              # 1st, 5th, "So. (2nd)", R-6th
+  from_word = dplyr::case_when(                                              # First Year, Fifth Year, ...
+    stringr::str_detect(s, "first")   ~ "1", stringr::str_detect(s, "second") ~ "2",
+    stringr::str_detect(s, "third")   ~ "3", stringr::str_detect(s, "fourth") ~ "4",
+    stringr::str_detect(s, "fifth")   ~ "5", stringr::str_detect(s, "sixth")  ~ "6",
+    stringr::str_detect(s, "seventh") ~ "7", stringr::str_detect(s, "eighth") ~ "8"
+  )
+  from_class = dplyr::case_when(                                             # Fr. / Sophomore / R-Jr. / Gr.
+    stringr::str_detect(s, "(senior|sr\\.?)\\+")             ~ "5",          # "Senior+" = beyond 4th year
+    stringr::str_detect(s, "\\b(fr|freshman|rf)\\b")         ~ "1",
+    stringr::str_detect(s, "\\b(so|sophomore)\\b")           ~ "2",
+    stringr::str_detect(s, "\\b(jr|junior)\\b")              ~ "3",
+    stringr::str_detect(s, "\\b(sr|senior)\\b")              ~ "4",
+    stringr::str_detect(s, "\\b(gr|graduate|post-bacc)\\b")  ~ "5",          # graduate students -> 5th year
+    stringr::str_detect(s, "^rs\\.?$")                       ~ "1"           # bare "Rs." = redshirt freshman
+  )
+  dplyr::coalesce(from_digit, from_word, from_class)
+}
+
+# Position -> spelled out; multi-position values keep every position ("WR/CB" -> "Wide Receiver/Cornerback")
+clean_position = function(x) {
+  x = stringr::str_squish(x)
+  x = dplyr::if_else(stringr::str_detect(x, "^[A-Z]+( [A-Z]+)+$"),           # "CB S" -> "CB/S"
+                     stringr::str_replace_all(x, " ", "/"), x)
+  purrr::map_chr(stringr::str_split(x, "\\s*/\\s*"), function(parts) {
+    if (all(is.na(parts))) return(NA_character_)
+    full = unname(position_lookup[stringr::str_to_upper(parts)])
+    if (any(is.na(full))) return(NA_character_)                               # unmapped -> NA (reported below)
+    if (setequal(full, c("Kicker", "Punter"))) return("Kicker/Punter")    # P/K, K/P, PK/P -> one label
+    paste(unique(full), collapse = "/")
+  })
+}
+
+# ============================================================================
+# Clean
+# ============================================================================
+fbs_rosters_clean = fbs_rosters_raw |>
+  dplyr::mutate(
+    # ---- Hometown: fix the few city/state values that were split or glued wrong ----
+    hometown_state = stringr::str_remove(hometown_state, "\\s*/.*$"),          # "N.J./Sayreville, N.J." -> "N.J."
+    hometown_city  = dplyr::if_else(hometown_city %in% "Bowling" & hometown_state %in% "Green, Ky.",
+                                    "Bowling Green", hometown_city),
+    hometown_state = dplyr::if_else(hometown_state %in% "Green, Ky.", "Ky.", hometown_state),
+
+    # City with the state glued on and no state ("Grand Rapids Mich.", "Brentwood. TN")
+    glued_tok      = stringr::str_extract(hometown_city, "(?<=[.\\s])\\S+$"),
+    glued          = is.na(hometown_state) & !is.na(glued_tok) & state_key(glued_tok) %in% names(us_lookup),
+    hometown_state = dplyr::if_else(glued, glued_tok, hometown_state),
+    hometown_city  = dplyr::if_else(glued, stringr::str_remove(hometown_city, "[.\\s]+\\S+$"), hometown_city),
+
+    # Region/country written in the city column, or high schools listed as the city
+    hometown_state = dplyr::case_when(
+      hometown_city == "American Samoa" ~ "American Samoa",
+      hometown_city == "Ireland"        ~ "Ireland",
+      hometown_city == "Bavaria"        ~ "Bavaria",
+      hometown_city == "Manitoba"       ~ "Manitoba, Canada",              # province was entered as the city
+      TRUE ~ hometown_state
+    ),
+    hometown_city = dplyr::case_when(
+      hometown_city %in% c("American Samoa", "Ireland", "Bavaria", "Manitoba") ~ NA_character_,
+      stringr::str_detect(hometown_city, "(\\bHS|Institute)$")     ~ NA_character_,
+      hometown_city == "Durhman"                                   ~ "Durham",
+      TRUE ~ hometown_city
+    ),
+
+    # East Carolina lists only the city for North Carolina players
+    hometown_state = dplyr::if_else(school == "East Carolina" & is.na(hometown_state) & !is.na(hometown_city),
+                                    "N.C.", hometown_state),
+
+    # ---- Split "Region, Country" / "Region (Country)" ----
+    region_raw  = stringr::str_squish(stringr::str_remove(hometown_state, "\\s*[,(].*$")),
+    country_raw = stringr::str_match(hometown_state, "[,(]\\s*([^)]+)\\)?\\s*$")[, 2],
+    region_key  = state_key(region_raw),
+
+    us_code     = unname(us_lookup[region_key]),
+    province    = province_lookup$province[match(region_key, province_lookup$key)],
+    hometown_country = dplyr::case_when(
+      !is.na(us_code)     ~ "United States",
+      !is.na(country_raw) ~ unname(country_lookup[state_key(country_raw)]),
+      !is.na(province)    ~ province_lookup$country[match(region_key, province_lookup$key)],
+      TRUE                ~ unname(country_lookup[region_key])
+    ),
+    hometown_state = dplyr::coalesce(us_code, province),                       # NA when only a country is listed
+
+    # ---- Year, position ----
+    year     = clean_year(year),
+    position = clean_position(position),
+
+    # ---- Previous schools: drop leading slashes ("/ Auburn // SMU" -> "Auburn // SMU") ----
+    previous_school = stringr::str_squish(stringr::str_remove(previous_school, "^[\\s/]+"))
+  ) |>
+  # One previous school per column, split on "/" (any number of slashes) or ","
+  tidyr::separate_wider_delim(
+    previous_school,
+    delim     = stringr::regex("\\s*/+\\s*|,\\s*"),
+    names_sep = "_",                                                          # previous_school_1, _2, ...
+    too_few   = "align_start"
+  ) |>
+  dplyr::mutate(
+    dplyr::across(tidyselect::starts_with("previous_school_"), ~ dplyr::na_if(stringr::str_squish(.x), "")),
+
+    # ---- Types: nominal -> factor, measurements -> numeric ----
+    school           = factor(school),
+    conference       = factor(conference),
+    year             = factor(year, levels = as.character(1:8)),
+    position         = factor(position),
+    hometown_state   = factor(hometown_state),
+    hometown_country = factor(hometown_country),
+    height_in        = as.numeric(height_in),
+    weight_lbs       = as.numeric(weight_lbs)
+  ) |>
+  dplyr::select(school, conference, name, year, position, height_in, weight_lbs,
+                hometown_city, hometown_state, hometown_country, tidyselect::starts_with("previous_school_"))
+
+# ============================================================================
+# Checks: anything that had a value before cleaning but NA after was not recognized
+# ============================================================================
+unmapped = function(before, after) sort(unique(before[!is.na(before) & is.na(after)]))
+message("Unrecognized years:     ", paste(unmapped(fbs_rosters_raw$year, fbs_rosters_clean$year), collapse = " | "))
+message("Unrecognized positions: ", paste(unmapped(fbs_rosters_raw$position, fbs_rosters_clean$position), collapse = " | "))
+message("Unrecognized hometowns: ",
+        paste(unmapped(fbs_rosters_raw$hometown_state,
+                       dplyr::coalesce(as.character(fbs_rosters_clean$hometown_state),
+                                       as.character(fbs_rosters_clean$hometown_country))), collapse = " | "))
+```
 
 ## Save the cleaned data
 
 Write to `../data/processed/`.
+
+```{r}
+processed_dir = "../data/processed"
+
+
+write.csv(fbs_rosters_clean, 
+          file.path(processed_dir, "fbs_rosters_clean.csv"), 
+          row.names = FALSE)
+```
