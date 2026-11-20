@@ -651,6 +651,10 @@ print(dplyr::count(fbs_rosters, conference))
 
 What one row is: [ ]
 
+```{r}
+
+```
+
 ## Source 3: Collegefootballdata.com (API)
 
 What one row is: Each row is a player for a season, with one column per statistic.
