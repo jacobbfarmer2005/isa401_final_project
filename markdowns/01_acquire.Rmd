@@ -655,7 +655,7 @@ What one row is: [ ]
 
 ```
 
-## Source 3: Collegefootballdata.com (API)
+## Source 3: collegefootballdata.com (API)
 
 What one row is: a player for a season, with columns for player statistic, one column per statistic.
 
@@ -692,7 +692,7 @@ cfbd_player_stats = purrr::map(target_years, function(yr) {
     id_cols     = tidyselect::any_of(c("season", "playerId", "player", "team", "conference", "position")),
     names_from  = stat_name,
     values_from = stat,
-    values_fn   = dplyr::first                          # guards against rare duplicate rows
+    values_fn   = dplyr::first    # guards against rare duplicate rows
   ) |>
   dplyr::rename(name = player, school = team, player_id = playerId) |>
   dplyr::relocate(school, conference, name, position, .after = season) |>
