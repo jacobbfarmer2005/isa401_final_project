@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ## Source 1: School Rosters (Web Scraping)
 
-What one row is: Each Row is a Player on a team.
+What one row is: a Player on a team.
 
 ```{r fbs_scraper, message=TRUE, warning=TRUE}
 # ---- Chrome for read_html_live() (Utah State, plus last-attempt retries) ----
@@ -657,7 +657,7 @@ What one row is: [ ]
 
 ## Source 3: Collegefootballdata.com (API)
 
-What one row is: Each row is a player for a season, with one column per statistic.
+What one row is: a player for a season, with columns for player statistic, one column per statistic.
 
 ```{r}
 get_cfbd_data = function(endpoint, query_params = list()) {
