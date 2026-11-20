@@ -645,8 +645,6 @@ if (nrow(suspicious) > 0) {
 }
 
 print(dplyr::count(fbs_rosters, conference))
-
-write.csv(fbs_rosters, "fbs_rosters.csv", row.names = FALSE)
 ```
 
 ## Source 2: American Community Survey (API)
@@ -655,7 +653,7 @@ What one row is: [ ]
 
 ## Source 3: Collegefootballdata.com (API)
 
-What one row is: For Player_Season_Stats, one row is one statistic for a player.
+What one row is: Each row is a player for a season, with one column per statistic.
 
 ```{r}
 get_cfbd_data = function(endpoint, query_params = list()) {
@@ -675,17 +673,41 @@ get_cfbd_data = function(endpoint, query_params = list()) {
 
 target_years = 2026
 
-player_season_stats = purrr::map(target_years, ~ get_cfbd_data("/stats/player/season", list(year = .x))) |>
-  dplyr::bind_rows()
+# Wide format: one row = one player, one column per stat (e.g. passing_yds, rushing_td)
+cfbd_player_stats = player_season_stats |>
+  dplyr::mutate(
+    stat_name = stringr::str_to_lower(paste(category, statType, sep = "_")) |>
+      stringr::str_replace_all("[^a-z0-9]+", "_"),
+    stat = suppressWarnings(as.numeric(stat))
+  ) |>
+  tidyr::pivot_wider(
+    id_cols     = tidyselect::any_of(c("season", "playerId", "player", "team", "conference", "position")),
+    names_from  = stat_name,
+    values_from = stat,
+    values_fn   = dplyr::first                          # guards against rare duplicate rows
+  ) |>
+  dplyr::rename(name = player, school = team, player_id = playerId) |>
+  dplyr::relocate(school, conference, name, position, .after = season) |>
+  dplyr::arrange(conference, school, name)
 
-dplyr::glimpse(player_season_stats)
+message(nrow(player_season_stats), " stat rows -> ", nrow(cfbd_player_stats), " players, ",
+        ncol(cfbd_player_stats), " columns")
+dplyr::glimpse(cfbd_player_stats)
 ```
 
 ## Save the raw data
 
-Write each source to `../data/raw/`.
-
 ```{r}
+raw_dir = "../data/raw"
 
+write.csv(fbs_rosters,
+          file.path(raw_dir, "fbs_rosters.csv"),
+          row.names = FALSE)
+write.csv(player_season_stats,
+          file.path(raw_dir, "cfbd_player_stats_long.csv"),
+          row.names = FALSE)
+write.csv(cfbd_player_stats,
+          file.path(raw_dir, "cfbd_player_stats.csv"),
+          row.names = FALSE)
 ```
 
