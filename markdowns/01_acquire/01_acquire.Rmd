@@ -56,7 +56,7 @@ player_season_stats <- map_dfr(target_years, ~ {
 ```
 
 
-What one row is: [ ]
+What one row is: [For Player_Usage, one row is one player. For Player_Season_Stats, one row is one statistic for a player]
 
 ## Save the raw data
 
