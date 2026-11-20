@@ -7,21 +7,27 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r setup}
-install.packages(c(
-  "tidycensus",
-  "tidyverse",
-  "sf",
-  "tigris"
-))
 
 library(tidycensus)
 library(tidyverse)
 library(sf)
 library(tigris)
+library(here)
+
+census_dir <- here(
+  "data",
+  "census"
+)
+
+dir.create(
+  census_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+options(tigris_use_cache = TRUE)
 ```
+
 
 
 ### TESTING WITH OHIO
@@ -105,8 +111,6 @@ ohio_census_geo <- ohio_census %>%
   )
 
 head(ohio_census_geo)
-
-View(ohio_census_geo)
 
 dim(ohio_census_geo)
 ```
@@ -298,7 +302,7 @@ head(national_coordinates)
 # Save geographic coordinates
 saveRDS(
   national_coordinates,
-  "data/census/national_coordinates_2024.rds"
+  file.path(census_dir, "national_coordinates_2024.rds")
 )
 ```
 
@@ -313,8 +317,6 @@ national_census_geo <- national_census %>%
 dim(national_census_geo)
 
 head(national_census_geo)
-
-View(national_census_geo)
 ```
 
 ```{r national_validation}
@@ -351,6 +353,124 @@ national_census_geo %>%
 # Inspect state coverage
 national_census_geo %>%
   count(state_abbr, sort = TRUE)
+```
+
+```{r validation_summary}
+validation_summary <- national_census_geo %>%
+  summarise(
+    total_places = n(),
+    states = n_distinct(state_abbr),
+    missing_coordinates = sum(
+      is.na(latitude) | is.na(longitude)
+    ),
+    missing_income = sum(is.na(median_incomeE)),
+    missing_population = sum(is.na(populationE)),
+    missing_poverty_rate = sum(is.na(poverty_rate)),
+    duplicate_geoids = sum(duplicated(GEOID)),
+    invalid_poverty_rates = sum(
+      poverty_rate < 0 | poverty_rate > 100,
+      na.rm = TRUE
+    )
+  )
+
+validation_summary
+```
+
+```{r census_value_checks}
+# Check for invalid or unusual Census values
+census_value_checks <- national_census_geo %>%
+  summarise(
+    total_places = n(),
+
+    negative_income = sum(
+      median_incomeE < 0,
+      na.rm = TRUE
+    ),
+
+    zero_income = sum(
+      median_incomeE == 0,
+      na.rm = TRUE
+    ),
+
+    missing_income = sum(
+      is.na(median_incomeE)
+    ),
+
+    negative_population = sum(
+      populationE < 0,
+      na.rm = TRUE
+    ),
+
+    zero_population = sum(
+      populationE == 0,
+      na.rm = TRUE
+    ),
+
+    negative_poverty_count = sum(
+      poverty_countE < 0,
+      na.rm = TRUE
+    ),
+
+    poverty_count_exceeds_total = sum(
+      poverty_countE > poverty_totalE,
+      na.rm = TRUE
+    )
+  )
+
+census_value_checks
+```
+
+```{r data_quality_flags}
+# Create data-quality indicators
+national_census_geo <- national_census_geo %>%
+  mutate(
+    flag_zero_population = populationE == 0,
+
+    flag_missing_income = is.na(median_incomeE),
+
+    flag_missing_poverty = is.na(poverty_rate),
+
+    flag_incomplete_socioeconomic =
+      flag_zero_population |
+      flag_missing_income |
+      flag_missing_poverty
+  )
+
+# Summarize the flags
+national_census_geo %>%
+  summarise(
+    zero_population = sum(flag_zero_population),
+    missing_income = sum(flag_missing_income),
+    missing_poverty = sum(flag_missing_poverty),
+    incomplete_socioeconomic = sum(
+      flag_incomplete_socioeconomic
+    )
+  )
+```
+
+```{r quality_issues_table}
+census_value_issues <- national_census_geo %>%
+  filter(flag_incomplete_socioeconomic) %>%
+  select(
+    GEOID,
+    NAME,
+    state_abbr,
+    populationE,
+    median_incomeE,
+    poverty_rate,
+    flag_zero_population,
+    flag_missing_income,
+    flag_missing_poverty
+  )
+
+write_csv(
+  census_value_issues,
+  "data/census/census_value_issues_2024.csv"
+)
+
+nrow(census_value_issues)
+
+head(census_value_issues)
 ```
 
 ```{r more_validation}
@@ -408,7 +528,110 @@ national_census_geo %>%
   )
 ```
 
+```{r standardize_names}
+national_census_match <- national_census_geo %>%
+  mutate(
+    city_clean = NAME %>%
+      str_remove(",.*$") %>%
+      str_remove(
+        "\\s+(city|town|village|CDP|borough|municipality)$"
+      ) %>%
+      str_squish() %>%
+      str_to_lower(),
 
+    state_clean = str_to_upper(state_abbr)
+  )
+
+national_census_match %>%
+  filter(
+    state_clean == "OH",
+    city_clean %in% c(
+      "oxford",
+      "cleveland",
+      "toledo",
+      "columbus"
+    )
+  ) %>%
+  select(
+    GEOID,
+    NAME,
+    city_clean,
+    state_clean,
+    median_incomeE,
+    populationE,
+    latitude,
+    longitude
+  )
+```
+
+```{r duplicate_check}
+duplicate_city_names <- national_census_match %>%
+  count(city_clean, state_clean) %>%
+  filter(n > 1) %>%
+  arrange(desc(n))
+
+duplicate_city_names
+
+nrow(duplicate_city_names)
+```
+
+```{r investigate_duplicates}
+duplicate_details <- national_census_match %>%
+  inner_join(
+    duplicate_city_names,
+    by = c("city_clean", "state_clean")
+  ) %>%
+  select(
+    GEOID,
+    NAME,
+    city_clean,
+    state_clean,
+    populationE,
+    median_incomeE,
+    latitude,
+    longitude
+  ) %>%
+  arrange(state_clean, city_clean)
+
+duplicate_details
+
+View(duplicate_details)
+```
+
+```{r duplicate_solve}
+# Identify the number of Census records per city/state
+census_match_counts <- national_census_match %>%
+  count(city_clean, state_clean, name = "match_count")
+
+# Add the match count to every Census record
+national_census_match <- national_census_match %>%
+  left_join(
+    census_match_counts,
+    by = c("city_clean", "state_clean")
+  )
+
+# Create a reference containing only unique city/state matches
+census_unique <- national_census_match %>%
+  filter(match_count == 1)
+
+# Create a separate reference for ambiguous matches
+census_ambiguous <- national_census_match %>%
+  filter(match_count > 1)
+
+# Check the results
+nrow(census_unique)
+nrow(census_ambiguous)
+
+# Verify that no Census records were lost
+nrow(census_unique) + nrow(census_ambiguous)
+
+# Confirm unique reference keys really are unique
+sum(
+  duplicated(
+    census_unique[c("city_clean", "state_clean")]
+  )
+)
+```
 
 ### Saving everything
 
@@ -436,6 +659,17 @@ write_csv(
 write_csv(
   validation_summary,
   "data/census/census_validation_summary_2024.csv"
+)
+
+# duplicate solutions
+write_csv(
+  census_unique,
+  "data/census/census_unique_2024.csv"
+)
+
+write_csv(
+  census_ambiguous,
+  "data/census/census_ambiguous_2024.csv"
 )
 ```
 
