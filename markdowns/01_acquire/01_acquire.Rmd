@@ -20,8 +20,62 @@ What one row is: [ ]
 
 ## Source 3: [Collegefootballdata.com] (API)
 
+```{r}
+get_cfbd_data <- function(endpoint, query_params = list()) {
+  base_url <- "https://api.collegefootballdata.com"
+  api_key <- Sys.getenv("CFBD_API_KEY")
+  
+  if (api_key == "") {
+    stop("CFBD_API_KEY environment variable is not set. Check your .Renviron.")
+  }
+  
+  req <- request(paste0(base_url, endpoint)) %>%
+    req_headers(
+      "Authorization" = paste("Bearer", api_key),
+      "Accept" = "application/json"
+    ) %>%
+    req_url_query(!!!query_params) %>%
+    req_retry(max_tries = 3, backoff = ~ 2) # Automatically retries if rate-limited or dropped
+  
+  resp <- req_perform(req)
+  
+  # Parse JSON into a flat data frame automatically
+  resp_body_json(resp, simplifyVector = TRUE)
+}
+
+target_years <- 2026
+
+
+player_usage <- map_dfr(target_years, ~ {
+  get_cfbd_data("/player/usage", list(year = .x))
+})
+
+player_season_stats <- map_dfr(target_years, ~ {
+  get_cfbd_data("/stats/player/season", list(year = .x))
+})
+```
+
+
 What one row is: [ ]
 
 ## Save the raw data
 
 Write each source to `../data/raw/`.
+
+```{r}
+
+
+#Source 3:
+
+dir.create("../data/raw", recursive = TRUE, showWarnings = FALSE)
+# Flatten nested list-columns so write_csv() succeeds
+player_usage_flat <- player_usage %>%
+  unnest(usage, names_sep = "_")
+
+
+
+# Export clean CSVs
+write_csv(player_usage_flat, "../../data/raw/player_usage.csv")
+write_csv(player_season_stats, "../../data/raw/player_season_stats.csv")
+```
+
