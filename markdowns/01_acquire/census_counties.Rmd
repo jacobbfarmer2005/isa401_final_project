@@ -1,0 +1,270 @@
+---
+title: "census_counties"
+author: "Peter Franz"
+date: "2026-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidycensus)
+library(tidyverse)
+library(sf)
+library(tigris)
+library(here)
+
+census_dir <- here("data", "census")
+
+dir.create(
+  census_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+options(tigris_use_cache = TRUE)
+```
+
+### Nationwide County-Level Socioeconomic data
+
+```{r nationwide_county_data}
+
+national_counties <- get_acs(
+  geography = "county",
+
+  variables = c(
+    median_income = "B19013_001",
+    population = "B01003_001",
+    poverty_total = "B17001_001",
+    poverty_count = "B17001_002",
+
+    education_total = "B15003_001",
+    bachelors = "B15003_022",
+    masters = "B15003_023",
+    professional = "B15003_024",
+    doctorate = "B15003_025"
+  ),
+
+  year = 2024,
+  survey = "acs5",
+  output = "wide"
+)
+
+national_counties <- national_counties %>%
+  mutate(
+    state_fips = str_sub(GEOID, 1, 2),
+
+    poverty_rate = if_else(
+      poverty_totalE > 0,
+      poverty_countE / poverty_totalE * 100,
+      NA_real_
+    ),
+
+    bachelors_or_higher = if_else(
+      education_totalE > 0,
+      (
+        bachelorsE +
+        mastersE +
+        professionalE +
+        doctorateE
+      ) / education_totalE * 100,
+      NA_real_
+    )
+  )
+
+dim(national_counties)
+
+head(national_counties)
+
+# Exclude Puerto Rico to match the city-level dataset
+national_counties <- national_counties %>%
+  filter(state_fips != "72")
+
+# Verify county counts
+nrow(national_counties)
+
+# Verify 50 states + Washington, DC
+n_distinct(national_counties$state_fips)
+```
+
+```{r county_validation}
+county_validation <- national_counties %>%
+  summarise(
+    total_counties = n(),
+
+    states_and_dc = n_distinct(state_fips),
+
+    duplicate_geoids = sum(
+      duplicated(GEOID)
+    ),
+
+    missing_income = sum(
+      is.na(median_incomeE)
+    ),
+
+    missing_population = sum(
+      is.na(populationE)
+    ),
+
+    missing_education = sum(
+      is.na(bachelors_or_higher)
+    ),
+
+    invalid_poverty = sum(
+      poverty_rate < 0 | poverty_rate > 100,
+      na.rm = TRUE
+    ),
+
+    invalid_education = sum(
+      bachelors_or_higher < 0 |
+      bachelors_or_higher > 100,
+      na.rm = TRUE
+    )
+  )
+
+county_validation
+```
+
+```{r county_boundaries}
+options(tigris_use_cache = TRUE)
+
+# Download 2024 county boundaries nationwide
+county_boundaries <- tigris::counties(
+  year = 2024,
+  cb = TRUE
+)
+
+# Keep the same geographic scope as our Census data
+county_boundaries <- county_boundaries %>%
+  filter(
+    GEOID %in% national_counties$GEOID
+  )
+
+# Inspect the geographic data
+dim(county_boundaries)
+
+names(county_boundaries)
+
+head(county_boundaries)
+```
+
+```{r missing_county}
+national_counties %>%
+  filter(is.na(median_incomeE)) %>%
+  select(GEOID, NAME, populationE)
+```
+
+```{r county_geographic reference}
+# Convert land area from square meters to square miles
+county_boundaries <- county_boundaries %>%
+  mutate(
+    land_area_sqmi = as.numeric(ALAND) / 2589988.110336
+  )
+
+# Project boundaries before generating representative points
+county_projected <- st_transform(
+  county_boundaries,
+  crs = 6933
+)
+
+# Generate a point inside each county
+county_points <- st_point_on_surface(
+  county_projected
+)
+
+# Convert points to latitude and longitude
+county_points <- st_transform(
+  county_points,
+  crs = 4326
+)
+
+# Extract coordinates
+county_coords <- st_coordinates(county_points)
+
+county_points$longitude <- county_coords[, "X"]
+county_points$latitude <- county_coords[, "Y"]
+
+# Create a geographic lookup table
+county_geography <- county_points %>%
+  st_drop_geometry() %>%
+  select(
+    GEOID,
+    land_area_sqmi,
+    longitude,
+    latitude
+  )
+
+head(county_geography)
+```
+```{r geographic_data_merge}
+
+national_counties_geo <- national_counties %>%
+  left_join(
+    county_geography,
+    by = "GEOID"
+  ) %>%
+  mutate(
+    population_density = if_else(
+      land_area_sqmi > 0,
+      populationE / land_area_sqmi,
+      NA_real_
+    )
+  )
+
+dim(national_counties_geo)
+
+head(
+  national_counties_geo %>%
+    select(
+      GEOID,
+      NAME,
+      populationE,
+      land_area_sqmi,
+      population_density,
+      latitude,
+      longitude
+    )
+)
+```
+
+```{r validate_merge}
+county_geo_validation <- national_counties_geo %>%
+  summarise(
+    total_counties = n(),
+    missing_coordinates = sum(
+      is.na(latitude) | is.na(longitude)
+    ),
+    missing_land_area = sum(is.na(land_area_sqmi)),
+    missing_density = sum(is.na(population_density)),
+    duplicate_geoids = sum(duplicated(GEOID))
+  )
+
+county_geo_validation
+
+nrow(national_counties)
+nrow(national_counties_geo)
+```
+
+```{r save_county_data}
+
+write_csv(
+  national_counties_geo,
+  file.path(census_dir, "national_counties_geo_2024.csv")
+)
+
+saveRDS(
+  national_counties_geo,
+  file.path(census_dir, "national_counties_geo_2024.rds")
+)
+
+write_csv(
+  county_validation,
+  file.path(census_dir, "county_validation_2024.csv")
+)
+
+write_csv(
+  county_geo_validation,
+  file.path(census_dir, "county_geo_validation_2024.csv")
+)
+```
+

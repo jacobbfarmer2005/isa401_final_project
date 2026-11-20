@@ -82,39 +82,35 @@ dim(city_boundaries)
 dim(county_boundaries)
 ```
 
-```{r id_city_county_relationships}
+```{r simple_county_matching}
+# Generate one representative point per Census place
+city_points <- st_point_on_surface(city_boundaries)
 
-# Find which county boundaries intersect each Census place
-county_matches <- st_intersects(
-  city_boundaries,
-  county_boundaries
+# Match each point to the county containing it
+city_county_lookup <- st_join(
+  city_points,
+  county_boundaries %>%
+    select(county_geoid, county_name),
+  join = st_within,
+  left = TRUE
 )
 
-# Count the number of matching counties for each place
-city_county_counts <- city_boundaries %>%
+# Remove geometry and keep matching variables
+city_county_lookup <- city_county_lookup %>%
   st_drop_geometry() %>%
-  mutate(
-    county_count = lengths(county_matches),
-    county_status = case_when(
-      county_count == 0 ~ "No match",
-      county_count == 1 ~ "Single county",
-      county_count > 1 ~ "Multiple counties"
-    )
+  select(
+    city_geoid,
+    city_name,
+    county_geoid,
+    county_name
   )
 
-# Summarize the results
-city_county_counts %>%
-  count(county_status)
+dim(city_county_lookup)
 
-# Inspect places intersecting multiple counties
-city_county_counts %>%
-  filter(county_count > 1) %>%
-  arrange(desc(county_count)) %>%
-  head(20)
+head(city_county_lookup)
 ```
 
-```{r city_county_overlaps}
-
+```{r county_overlap}
 # Identify counties whose interiors overlap each Census place
 county_overlaps <- st_relate(
   city_boundaries,
@@ -122,37 +118,73 @@ county_overlaps <- st_relate(
   pattern = "T********"
 )
 
-# Count overlapping counties for each Census place
-city_county_refined <- city_boundaries %>%
-  st_drop_geometry() %>%
-  mutate(
-    county_count = lengths(county_overlaps),
-    county_status = case_when(
-      county_count == 0 ~ "No match",
-      county_count == 1 ~ "Single county",
-      county_count > 1 ~ "Multiple counties"
-    )
-  )
+# Count counties overlapping each Census place
+county_counts <- tibble(
+  city_geoid = city_boundaries$city_geoid,
+  county_count = lengths(county_overlaps)
+)
 
-# Summarize geographic relationships
-city_county_refined %>%
-  count(county_status)
-
-# Inspect the same locations as before
-city_county_refined %>%
-  filter(
-    city_geoid %in% c(
-      "3651000",
-      "4260000",
-      "4055000",
-      "4827000"
-    )
+# Add the ambiguity flag
+city_county_lookup <- city_county_lookup %>%
+  left_join(
+    county_counts,
+    by = "city_geoid"
   ) %>%
-  select(
-    city_geoid,
-    city_name,
-    county_count,
-    county_status
+  mutate(
+    multiple_counties = county_count > 1
   )
+
+# Summarize results
+city_county_lookup %>%
+  count(multiple_counties)
+```
+
+```{r county_match status}
+# Create a descriptive matching status
+city_county_lookup <- city_county_lookup %>%
+  mutate(
+    county_match_status = if_else(
+      multiple_counties,
+      "Requires county verification",
+      "Single-county match"
+    )
+  )
+
+# Check results
+city_county_lookup %>%
+  count(county_match_status)
+```
+
+```{r city_county_validation}
+# Validate the city-to-county lookup
+city_county_validation <- city_county_lookup %>%
+  summarise(
+    total_places = n(),
+    missing_counties = sum(is.na(county_geoid)),
+    duplicate_cities = sum(duplicated(city_geoid)),
+    single_county_places = sum(!multiple_counties),
+    multi_county_places = sum(multiple_counties)
+  )
+
+city_county_validation
+```
+
+```{r}
+# Save the completed city-to-county lookup
+write_csv(
+  city_county_lookup,
+  file.path(census_dir, "city_county_lookup_2024.csv")
+)
+
+saveRDS(
+  city_county_lookup,
+  file.path(census_dir, "city_county_lookup_2024.rds")
+)
+
+# Save validation results
+write_csv(
+  city_county_validation,
+  file.path(census_dir, "city_county_validation_2024.csv")
+)
 ```
 
