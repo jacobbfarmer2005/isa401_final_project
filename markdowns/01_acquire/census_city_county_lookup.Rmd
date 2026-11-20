@@ -1,0 +1,158 @@
+---
+title: "census city county lookup"
+author: "Peter Franz"
+date: "2026-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+library(tigris)
+library(here)
+
+census_dir <- here("data", "census")
+
+options(tigris_use_cache = TRUE)
+```
+
+```{r geographic_matching}
+
+# Load the saved nationwide city and county datasets
+national_census_geo <- readRDS(
+  file.path(census_dir, "national_census_geo_2024.rds")
+)
+
+national_counties_geo <- readRDS(
+  file.path(census_dir, "national_counties_geo_2024.rds")
+)
+
+# Retrieve 2024 nationwide Census place boundaries
+city_boundaries <- tigris::places(
+  state = NULL,
+  year = 2024,
+  cb = TRUE
+)
+
+# Keep only places in our existing Census dataset
+city_boundaries <- city_boundaries %>%
+  filter(GEOID %in% national_census_geo$GEOID)
+
+# Retrieve 2024 county boundaries
+county_boundaries <- tigris::counties(
+  year = 2024,
+  cb = TRUE
+)
+
+# Keep only counties in our existing dataset
+county_boundaries <- county_boundaries %>%
+  filter(GEOID %in% national_counties_geo$GEOID)
+
+# Keep essential identifiers and geometry
+city_boundaries <- city_boundaries %>%
+  select(
+    city_geoid = GEOID,
+    city_name = NAME,
+    geometry
+  )
+
+county_boundaries <- county_boundaries %>%
+  select(
+    county_geoid = GEOID,
+    county_name = NAME,
+    geometry
+  )
+
+# Convert both datasets to the same projected CRS
+city_boundaries <- st_transform(
+  city_boundaries,
+  crs = 6933
+)
+
+county_boundaries <- st_transform(
+  county_boundaries,
+  crs = 6933
+)
+
+# Check the resulting dimensions
+dim(city_boundaries)
+
+dim(county_boundaries)
+```
+
+```{r id_city_county_relationships}
+
+# Find which county boundaries intersect each Census place
+county_matches <- st_intersects(
+  city_boundaries,
+  county_boundaries
+)
+
+# Count the number of matching counties for each place
+city_county_counts <- city_boundaries %>%
+  st_drop_geometry() %>%
+  mutate(
+    county_count = lengths(county_matches),
+    county_status = case_when(
+      county_count == 0 ~ "No match",
+      county_count == 1 ~ "Single county",
+      county_count > 1 ~ "Multiple counties"
+    )
+  )
+
+# Summarize the results
+city_county_counts %>%
+  count(county_status)
+
+# Inspect places intersecting multiple counties
+city_county_counts %>%
+  filter(county_count > 1) %>%
+  arrange(desc(county_count)) %>%
+  head(20)
+```
+
+```{r city_county_overlaps}
+
+# Identify counties whose interiors overlap each Census place
+county_overlaps <- st_relate(
+  city_boundaries,
+  county_boundaries,
+  pattern = "T********"
+)
+
+# Count overlapping counties for each Census place
+city_county_refined <- city_boundaries %>%
+  st_drop_geometry() %>%
+  mutate(
+    county_count = lengths(county_overlaps),
+    county_status = case_when(
+      county_count == 0 ~ "No match",
+      county_count == 1 ~ "Single county",
+      county_count > 1 ~ "Multiple counties"
+    )
+  )
+
+# Summarize geographic relationships
+city_county_refined %>%
+  count(county_status)
+
+# Inspect the same locations as before
+city_county_refined %>%
+  filter(
+    city_geoid %in% c(
+      "3651000",
+      "4260000",
+      "4055000",
+      "4827000"
+    )
+  ) %>%
+  select(
+    city_geoid,
+    city_name,
+    county_count,
+    county_status
+  )
+```
+

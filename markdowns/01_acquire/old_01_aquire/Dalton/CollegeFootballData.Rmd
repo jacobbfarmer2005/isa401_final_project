@@ -48,53 +48,59 @@ get_cfbd_data <- function(endpoint, query_params = list()) {
 ```
 
 ```{r}
-target_years <- c(2024, 2025)
+target_years <- 2026
 
 # 1. TEAMS DATA
 # Pulls core team info, FBS lists, and venue details
-teams_fbs <- get_cfbd_data("/teams/fbs", list(year = 2025))
-all_teams <- get_cfbd_data("/teams")
+#teams_fbs <- get_cfbd_data("/teams/fbs", list(year = 2025))
+#all_teams <- get_cfbd_data("/teams")
 
 # 2. ROSTER DATA (Iterated by year)
 # Pulls historical player rosters
-rosters_df <- map_dfr(target_years, ~ {
-  message(sprintf("Pulling rosters for %d...", .x))
-  
-  tryCatch({
-    get_cfbd_data("/roster", list(year = .x, classification = "fbs"))
-  }, error = function(e) {
-    warning(sprintf("Failed for year %d: %s", .x, e$message))
-    NULL
-  })
-})
+#rosters_df <- map_dfr(target_years, ~ {
+#  message(sprintf("Pulling rosters for %d...", .x))
+#  
+#  tryCatch({
+#    get_cfbd_data("/roster", list(year = .x, classification = "fbs"))
+#  }, error = function(e) {
+#    warning(sprintf("Failed for year %d: %s", .x, e$message))
+#    NULL
+#  })
+#})
 
 # 3. PLAYERS DATA 
 # Covers player search, usage, season overviews, and transfer portal entries
-transfer_portal <- map_dfr(target_years, ~ {
-  get_cfbd_data("/player/portal", list(year = .x))
-})
+#transfer_portal <- map_dfr(target_years, ~ {
+#  get_cfbd_data("/player/portal", list(year = .x))
+#})
 
 player_usage <- map_dfr(target_years, ~ {
   get_cfbd_data("/player/usage", list(year = .x))
 })
 
+player_season_stats <- map_dfr(target_years, ~ {
+  get_cfbd_data("/stats/player/season", list(year = .x))
+})
+
 # 4. RECRUITING DATA
 # Covers individual high school/JUCO recruits and team ranking summaries
-recruits_df <- map_dfr(target_years, ~ {
-  message(sprintf("Pulling recruiting class for %d...", .x))
-  get_cfbd_data("/recruiting/players", list(year = .x))
-})
+#recruits_df <- map_dfr(target_years, ~ {
+#  message(sprintf("Pulling recruiting class for %d...", .x))
+#  get_cfbd_data("/recruiting/players", list(year = .x))
+#})
 
-team_recruiting_rankings <- map_dfr(target_years, ~ {
-  get_cfbd_data("/recruiting/teams", list(year = .x))
-})
+#team_recruiting_rankings <- map_dfr(target_years, ~ {
+#  get_cfbd_data("/recruiting/teams", list(year = .x))
+#})
 
-team_recruiting_groups <- get_cfbd_data("/recruiting/groups", list(startYear = 2020, endYear = 2025))
+#team_recruiting_groups <- get_cfbd_data("/recruiting/groups", list(startYear = 2020, endYear = 2025))
 
 # 5. DRAFT DATA
 # Covers historical NFL draft picks (Note: The CFBD schema tracks draft history over time)
-draft_picks <- map_dfr(2023:2025, ~ {
-  get_cfbd_data("/draft/picks", list(year = .x))
-})
+#draft_picks <- map_dfr(2023:2025, ~ {
+#  get_cfbd_data("/draft/picks", list(year = .x))
+#})
+
+
 ```
 
