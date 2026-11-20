@@ -677,8 +677,12 @@ get_cfbd_data = function(endpoint, query_params = list()) {
 
 target_years = 2026
 
-# Wide format: one row = one player, one column per stat (e.g. passing_yds, rushing_td)
-cfbd_player_stats = player_season_stats |>
+# One row = one player, one column per stat (e.g. passing_yds, rushing_td)
+cfbd_player_stats = purrr::map(target_years, function(yr) {
+  get_cfbd_data("/stats/player/season", list(year = yr)) |>
+    dplyr::mutate(season = yr)
+}) |>
+  dplyr::bind_rows() |>
   dplyr::mutate(
     stat_name = stringr::str_to_lower(paste(category, statType, sep = "_")) |>
       stringr::str_replace_all("[^a-z0-9]+", "_"),
@@ -694,8 +698,7 @@ cfbd_player_stats = player_season_stats |>
   dplyr::relocate(school, conference, name, position, .after = season) |>
   dplyr::arrange(conference, school, name)
 
-message(nrow(player_season_stats), " stat rows -> ", nrow(cfbd_player_stats), " players, ",
-        ncol(cfbd_player_stats), " columns")
+message(nrow(cfbd_player_stats), " players, ", ncol(cfbd_player_stats), " columns")
 dplyr::glimpse(cfbd_player_stats)
 ```
 
@@ -706,9 +709,6 @@ raw_dir = "../data/raw"
 
 write.csv(fbs_rosters,
           file.path(raw_dir, "fbs_rosters.csv"),
-          row.names = FALSE)
-write.csv(player_season_stats,
-          file.path(raw_dir, "cfbd_player_stats_long.csv"),
           row.names = FALSE)
 write.csv(cfbd_player_stats,
           file.path(raw_dir, "cfbd_player_stats.csv"),
