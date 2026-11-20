@@ -1,0 +1,717 @@
+---
+title: "01 Acquire"
+output:
+  html_document:
+    toc: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Source 1: School Rosters (Web Scraping)
+
+What one row is: Each Row is a Player on a team.
+
+```{r fbs_scraper, message=TRUE, warning=TRUE}
+# ---- Chrome for read_html_live() (Utah State, plus last-attempt retries) ----
+if (.Platform$OS.type == "windows") {
+  chrome_path = file.path(Sys.getenv("LOCALAPPDATA"), "Google/Chrome/Application/chrome.exe")
+  if (file.exists(chrome_path)) Sys.setenv(CHROMOTE_CHROME = chrome_path)
+}
+options(chromote.timeout = 60)
+
+# ---- Helpers ---------------------------------------------------------------
+# Text of the first match inside each node (one value per node, NA if missing)
+txt = function(nodes, css) rvest::html_text2(rvest::html_element(nodes, css))
+
+# Same, but fill NAs using a fallback selector
+txt2 = function(nodes, css, fallback) {
+  x = txt(nodes, css)
+  miss = is.na(x)
+  if (any(miss)) x[miss] = txt(nodes[miss], fallback)
+  x
+}
+
+# All matches on the page (for layouts that are scraped as parallel vectors)
+txt_all = function(page, css) rvest::html_text2(rvest::html_elements(page, css))
+
+debracket = function(x) stringr::str_squish(stringr::str_remove_all(x, "\\[|\\]"))
+
+# Every text node inside one element, in order ("Year", "Redshirt Senior", "Height", ...)
+text_tokens = function(node) {
+  tok = stringr::str_squish(xml2::xml_text(xml2::xml_find_all(node, ".//text()")))
+  tok = stringr::str_remove(tok, ":$")
+  tok[tok != ""]
+}
+
+LABELS = c("Position", "Academic Year", "Year", "Class", "Height", "Weight",
+           "Hometown", "High School", "Previous School", "Last School")
+
+# Value that follows a visible label; also handles "Label value" in one node
+label_value = function(tok, labels) {
+  for (lab in labels) {
+    i = which(tok == lab)[1]
+    if (!is.na(i) && i < length(tok) && !(tok[i + 1] %in% LABELS)) return(tok[i + 1])
+    hit = tok[stringr::str_detect(tok, paste0("^", lab, "\\s"))]
+    if (length(hit)) return(stringr::str_remove(hit[1], paste0("^", lab, "\\s*")))
+  }
+  NA_character_
+}
+
+# Label-based fields for a set of cards (layout-independent)
+labeled_fields = function(cards) {
+  rows = purrr::map(cards, function(card) {
+    tok = text_tokens(card)
+    list(tok      = tok,
+         position = label_value(tok, "Position"),
+         year     = label_value(tok, c("Academic Year", "Year", "Class")),
+         height   = label_value(tok, "Height"),
+         weight   = label_value(tok, "Weight"),
+         hometown = label_value(tok, "Hometown"),
+         prev     = label_value(tok, c("Previous School", "Last School")))
+  })
+  get = function(k) purrr::map_chr(rows, ~ .x[[k]])
+  list(rows = rows, position = get("position"), year = get("year"), height = get("height"),
+       weight = get("weight"), hometown = get("hometown"), prev = get("prev"))
+}
+
+# Height detection: any text shaped like 6' 2'', 6′2″, or 6-2
+height_re = "^[4-7]\\s*(['′’]|-)\\s*\\d{1,2}(\\.\\d+|\\s*½|\\s+1/2)?\\s*(''|\"|″|”|’’)?$"
+
+first_height = function(x) {
+  x = stringr::str_remove(stringr::str_squish(x), "^(Height|Ht\\.?|HT)\\s*")
+  x[stringr::str_detect(x, height_re)][1]
+}
+
+# Search every element in each card for a height-shaped value
+find_height = function(cards) {
+  purrr::map_chr(cards, ~ first_height(rvest::html_text2(rvest::html_elements(.x, "span, div, p, td, li"))))
+}
+
+# WMT card view (.roster-card-item, e.g. LSU): name -> height lookup
+wmt_card_heights = function(page) {
+  cc = rvest::html_elements(page, ".roster-card-item")
+  if (length(cc) == 0) return(NULL)
+  tibble::tibble(
+    name = stringr::str_squish(txt2(cc, ".roster-card-item__title", "h3")),
+    h    = purrr::map_chr(cc, ~ first_height(rvest::html_text2(
+             rvest::html_elements(.x, ".roster-players-cards-item__profile-fields-wrapper span"))))
+  )
+}
+
+# Build one standardized roster table (tibble errors loudly if lengths differ)
+make_roster = function(name, year, position, height, weight, hometown, prev_school) {
+  hometown = stringr::str_remove(dplyr::coalesce(hometown, ""), "^\\s*Hometown:?\\s*")
+  home = stringr::str_split_fixed(hometown, ",", n = 2)
+  tibble::tibble(
+    name            = name,
+    year            = year,
+    position        = position,
+    height          = height,
+    weight_lbs      = weight,
+    hometown_city   = dplyr::na_if(stringr::str_squish(home[, 1]), ""),
+    hometown_state  = dplyr::na_if(stringr::str_squish(home[, 2]), ""),
+    previous_school = prev_school
+  )
+}
+
+# ---- Parsers (one per site layout) ----------------------------------------
+
+# Sidearm "nextgen" person cards (.s-person-card).
+# Stats are matched by their label ("Height 6' 2''"), not by position, so a
+# missing/extra stat no longer shifts every column.
+parse_card = function(page) {
+  cards = rvest::html_elements(page, ".s-person-card")
+  if (length(cards) == 0) stop("no .s-person-card cards")
+
+  items = purrr::map(cards, ~ stringr::str_squish(
+    rvest::html_text2(rvest::html_elements(.x, ".s-person-details__bio-stats-item"))))
+  by_label = function(re) purrr::map_chr(items, function(v) {
+    hit = v[stringr::str_detect(v, re)]
+    if (length(hit)) stringr::str_squish(stringr::str_remove(hit[1], re)) else NA_character_
+  })
+  position = by_label("^Position\\s*")
+  year     = by_label("^(Academic Year|Year|Class)\\s*")
+  height   = by_label("^Height\\s*")
+  weight   = by_label("^Weight\\s*")
+
+  # Only if the site has no labels at all, fall back to positional selectors
+  if (!any(stringr::str_detect(unlist(items), "^(Position|Height|Weight)"))) {
+    stat = function(i) txt(cards, paste0(".s-person-details__bio-stats-item:nth-child(", i, ")"))
+    position = stat(1); year = stat(2); height = stat(3); weight = stat(4)
+  }
+
+  # JMU: height sits in the 4th stat's 2nd span; otherwise search the whole card
+  if (any(is.na(height))) {
+    jmu_h = txt(cards, ".s-person-details__bio-stats > span:nth-child(4) > span:nth-child(2)")
+    jmu_h = dplyr::if_else(stringr::str_detect(stringr::str_squish(jmu_h), height_re), jmu_h, NA_character_)
+    height = dplyr::coalesce(height, jmu_h, find_height(cards))
+  }
+
+  prev = txt(cards, ".s-person-card__content__person__previous-school-item") |>
+    stringr::str_squish() |>
+    stringr::str_remove("^.*:\\s*") |>
+    stringr::str_remove("^Previous School(\\(s\\))?\\s*")
+
+  make_roster(
+    name = txt(cards, "h3"), position = position, year = year,
+    height = height, weight = weight,
+    hometown = txt(cards, ".s-person-card__content__person__location-item"),
+    prev_school = prev
+  ) |>
+    dplyr::filter(!is.na(position))                           # drops coach/staff cards
+}
+
+# WMT list view (.roster-list-item); also handles the alternate field layout
+# used by San Diego State / Washington State. Label-based values fill any gaps.
+parse_list = function(page) {
+  cards = rvest::html_elements(page, ".roster-list-item")
+  if (length(cards) == 0) stop("no .roster-list-item cards")
+  f = ".roster-player-list-profile-field--"
+  a = ".roster-list-item__fields-item"
+  use_alt = all(is.na(txt(cards, paste0(f, "position"))))
+  sel = function(primary, alternative) if (use_alt) paste0(primary, ", ", alternative) else primary
+  lab = labeled_fields(cards)
+
+  prev = debracket(txt(cards, sel(paste0(f, "previous-school"), paste0(a, ":nth-child(2) > :nth-child(4)"))))
+  prev = dplyr::coalesce(dplyr::na_if(prev, ""), lab$prev)
+  prev = dplyr::if_else(stringr::str_detect(prev, "(HS|H\\.S\\.|High School|School|Academy|Prep)$"), NA_character_, prev)
+  hs = debracket(txt(cards, paste0(f, "high-school")))
+  college = dplyr::if_else(stringr::str_detect(hs, "/"),
+                           stringr::str_squish(stringr::str_remove(hs, "^[^/]*/")),
+                           NA_character_)
+  prev = dplyr::if_else(is.na(prev) | prev == "", college, prev)
+
+  out = make_roster(
+    name     = txt(cards, sel(".roster-list-item__title", ".rosters-list-item__title-link")),
+    position = dplyr::coalesce(debracket(txt(cards, sel(paste0(f, "position"),    paste0(a, ":nth-child(1) > :nth-child(1)")))), lab$position),
+    year     = dplyr::coalesce(debracket(txt(cards, sel(paste0(f, "class-level"), paste0(a, ":nth-child(2) > :nth-child(1)")))), lab$year),
+    height   = dplyr::coalesce(txt(cards, sel(paste0(f, "height > span"),         paste0(a, ":nth-child(1) > :nth-child(2)"))),
+                               txt(cards, paste0(f, "height")), lab$height, find_height(cards)),
+    weight   = dplyr::coalesce(debracket(txt(cards, sel(paste0(f, "weight"),      paste0(a, ":nth-child(1) > :nth-child(3)")))), lab$weight),
+    hometown = dplyr::coalesce(debracket(txt(cards, sel(paste0(f, "hometown"),    paste0(a, ":nth-child(2) > :nth-child(2)")))), lab$hometown),
+    prev_school = prev
+  )
+
+  # LSU: heights only appear in the card-view markup -> match to players by name
+  if (all(is.na(out$height))) {
+    ch = wmt_card_heights(page)
+    if (!is.null(ch)) out$height = ch$h[match(stringr::str_squish(out$name), ch$name)]
+  }
+
+  dplyr::filter(out, !is.na(position))
+}
+
+# Penn State-style layout (.player-list-item): every field read by its label
+parse_player_list = function(page) {
+  cards = rvest::html_elements(page, ".player-list-item")
+  if (length(cards) == 0) stop("no .player-list-item cards")
+  lab = labeled_fields(cards)
+
+  pos_re = paste0("^(QB|RB|FB|WR|TE|OL|OT|OG|C|DL|DT|DE|NT|EDGE|LB|ILB|OLB|DB|CB|S|SAF|NB|K|P|PK|LS|ATH|",
+                  "(Offensive|Defensive|Wide|Running|Tight|Long|Place|Outside|Inside)\\s.*|",
+                  "Quarterback|Linebacker|Safety|Cornerback|Kicker|Punter|Fullback|Center|Athlete)$")
+  unlabeled_pos = purrr::map_chr(lab$rows, ~ .x$tok[stringr::str_detect(.x$tok, pos_re)][1])
+
+  make_roster(
+    name = txt2(cards, ".player-list-item__heading h3 a", "h3"),
+    position = dplyr::coalesce(lab$position, unlabeled_pos),
+    year = lab$year, height = dplyr::coalesce(lab$height, find_height(cards)), weight = lab$weight,
+    hometown = lab$hometown, prev_school = lab$prev
+  ) |>
+    dplyr::filter(!is.na(name), !(is.na(year) & is.na(height)))   # drops staff without needing a position
+}
+
+# Sidearm classic (.sidearm-roster-player). pos_mode covers per-school differences.
+parse_sidearm = function(page,
+                         pos_mode = c("last", "raw", "drop_last"),
+                         pos_css  = ".sidearm-roster-player-position .text-bold",
+                         year_css = ".sidearm-roster-player-academic-year") {
+  pos_mode = match.arg(pos_mode)
+  cards = rvest::html_elements(page, ".sidearm-roster-player")
+  pos = stringr::str_squish(txt(cards, pos_css))
+  pos = switch(pos_mode,
+               last      = stringr::str_extract(pos, "\\S+$"),
+               drop_last = stringr::str_remove(pos, "\\s+\\S+$"),
+               raw       = pos)
+  make_roster(
+    name = stringr::str_squish(txt2(cards, ".sidearm-roster-player-name h3 a", ".sidearm-roster-player-name h3")),
+    position = pos,
+    year     = txt(cards, year_css),
+    height   = txt(cards, ".sidearm-roster-player-height"),
+    weight   = txt(cards, ".sidearm-roster-player-weight"),
+    hometown = txt(cards, ".sidearm-roster-player-hometown"),
+    prev_school = txt(cards, ".sidearm-roster-player-previous-school")
+  ) |>
+    dplyr::filter(!is.na(name), name != "")
+}
+
+# WMT table view (UTSA, Old Dominion) - row by row
+parse_wmt_table = function(page) {
+  rows = rvest::html_elements(page, "tr")
+  cell = function(cls) txt(rows, paste0(".roster-table-cell--", cls, " > span"))
+  make_roster(
+    name = txt2(rows, "th > div > a > span", "th a"),
+    position = cell("player-position-name"), year = cell("class-level-name"),
+    height = cell("height-text"), weight = cell("weight-text"),
+    hometown = cell("hometown"), prev_school = cell("previous-school")
+  ) |>
+    dplyr::filter(!is.na(name), !is.na(position))
+}
+
+parse_notre_dame = function(page) {
+  rows = rvest::html_elements(page, "tr")
+  td = function(i, span = FALSE) txt(rows, paste0("td:nth-child(", i, ")", if (span) " > span" else ""))
+  make_roster(
+    name = txt2(rows, "th > div > a > span", "th a"),
+    position = td(3, TRUE), height = td(4, TRUE), weight = td(5, TRUE),
+    year = td(6), hometown = td(7),
+    prev_school = stringr::str_squish(stringr::str_extract(td(8), "(?<=/).*$"))
+  ) |>
+    dplyr::filter(!is.na(name), !is.na(position))
+}
+
+parse_kentucky = function(page) {
+  rows = rvest::html_elements(page, "tr")
+  td = function(i) txt(rows, paste0("td:nth-child(", i, ")"))
+  make_roster(
+    name = txt(rows, "td:nth-child(2) > a"),
+    position = td(3), height = td(4), weight = td(5), year = td(6),
+    hometown = td(7), prev_school = td(9)
+  ) |>
+    dplyr::filter(!is.na(name))
+}
+
+parse_south_carolina = function(page) {
+  hometown = txt_all(page, "td.hometown")
+  n = seq_along(hometown)                                     # one table row per player
+  info = stringr::str_split_fixed(txt_all(page, "div > p.info")[n], "\\s*/\\s*", n = 3)
+  make_roster(
+    name = txt_all(page, "h3 > div > a")[n],
+    position = txt_all(page, "div > span.position")[n],
+    height = info[, 1], weight = info[, 2], year = info[, 3],
+    hometown = hometown,
+    prev_school = txt_all(page, "td.previousschool")
+  )
+}
+
+parse_navy = function(page) {
+  rows = rvest::html_elements(page, "tr")
+  make_roster(
+    name = txt(rows, ".sidearm-table-player-name > a"),
+    position = txt(rows, ".rp_position_short"),
+    year = txt(rows, ".roster_class"),
+    height = txt(rows, ".height"),
+    weight = txt(rows, ".rp_weight"),
+    hometown = stringr::str_remove(txt(rows, ".hometownhighschool"), "\\s*(/|\\n).*$"),
+    prev_school = NA_character_                               # not listed on Navy's roster
+  ) |>
+    dplyr::filter(!is.na(name))
+}
+
+parse_utah_state = function(page) {
+  make_roster(
+    name = txt_all(page, ".sidearm-roster-player-name > a"),
+    position = txt_all(page, ".sidearm-roster-list-item-position"),
+    year = txt_all(page, ".sidearm-roster-list-item-year"),
+    height = txt_all(page, ".sidearm-roster-list-item-height") |>
+      stringr::str_remove_all("\"| ") |>
+      stringr::str_replace("'", "-"),
+    weight = txt_all(page, ".sidearm-roster-list-item-weight"),
+    hometown = txt_all(page, ".sidearm-roster-list-item-hometown"),
+    prev_school = stringr::str_squish(
+      stringr::str_extract(txt_all(page, ".sidearm-roster-list-item-highschool"), "(?<=/).*$")
+    )
+  )
+}
+
+# Last resort: any HTML <table> with a Name column
+parse_generic_table = function(page) {
+  tables = rvest::html_table(page)
+  tables = purrr::keep(tables, ~ nrow(.x) > 20 && any(stringr::str_detect(tolower(names(.x)), "name")))
+  if (length(tables) == 0) stop("no roster table found")
+  tb = tables[[which.max(purrr::map_int(tables, nrow))]]
+  col = function(pattern) {
+    i = which(stringr::str_detect(tolower(names(tb)), pattern))[1]
+    if (is.na(i)) NA_character_ else as.character(tb[[i]])
+  }
+  make_roster(
+    name = col("name"), position = col("^pos"),
+    year = col("^(cl|class|yr|year|elig|academic)"),
+    height = col("^(ht|height)"), weight = col("^(wt|weight)"),
+    hometown = col("hometown"), prev_school = col("previous|last school")
+  ) |>
+    dplyr::filter(!is.na(name), name != "")
+}
+
+parsers = list(
+  card           = parse_card,
+  list           = parse_list,
+  player_list    = parse_player_list,
+  sidearm        = function(p) parse_sidearm(p, pos_mode = "last"),
+  sidearm_raw    = function(p) parse_sidearm(p, pos_mode = "raw"),
+  sidearm_plain  = function(p) parse_sidearm(p, pos_mode = "raw", pos_css = ".sidearm-roster-player-position"),
+  sidearm_txst   = function(p) parse_sidearm(p, pos_mode = "drop_last", year_css = ".sidearm-roster-player-custom1"),
+  wmt_table      = parse_wmt_table,
+  notre_dame     = parse_notre_dame,
+  kentucky       = parse_kentucky,
+  south_carolina = parse_south_carolina,
+  navy           = parse_navy,
+  utah_state     = parse_utah_state,
+  generic_table  = parse_generic_table
+)
+
+# Try every known layout until one returns players
+parse_auto = function(page) {
+  for (p in c("card", "list", "player_list", "sidearm", "wmt_table", "generic_table")) {
+    out = tryCatch(parsers[[p]](page), error = function(e) NULL)
+    if (!is.null(out) && nrow(out) > 0) return(out)
+  }
+  stop("no known roster layout matched")
+}
+
+# ---- School list: every FBS team, its conference, URL, and layout ----------
+schools = tibble::tribble(
+  ~school, ~conference, ~url, ~parser,
+  # American
+  "UAB",            "American", "https://uabsports.com/sports/football/roster", "card",
+  "Tulsa",          "American", "https://tulsahurricane.com/sports/football/roster", "card",
+  "Charlotte",      "American", "https://charlotte49ers.com/sports/football/roster", "card",
+  "Army",           "American", "https://goarmywestpoint.com/sports/football/roster", "card",
+  "FAU",            "American", "https://fausports.com/sports/football/roster", "card",
+  "Memphis",        "American", "https://gotigersgo.com/sports/football/roster", "card",
+  "North Texas",    "American", "https://meangreensports.com/sports/football/roster", "card",
+  "East Carolina",  "American", "https://ecupirates.com/sports/football/roster", "card",
+  "Rice",           "American", "https://riceowls.com/sports/football/roster", "card",
+  "Temple",         "American", "https://owlsports.com/sports/football/roster", "card",
+  "Tulane",         "American", "https://tulanegreenwave.com/sports/football/roster", "card",
+  "USF",            "American", "https://gousfbulls.com/sports/football/roster", "card",
+  "UTSA",           "American", "https://goutsa.com/sports/football/roster", "wmt_table",
+  "Navy",           "American", "https://navysports.com/sports/football/roster", "navy",
+  # ACC
+  "Boston College", "ACC", "https://bceagles.com/sports/football/roster", "card",
+  "Wake Forest",    "ACC", "https://godeacs.com/sports/football/roster", "card",
+  "Duke",           "ACC", "https://goduke.com/sports/football/roster", "card",
+  "Florida State",  "ACC", "https://seminoles.com/sports/football/roster", "card",
+  "Louisville",     "ACC", "https://gocards.com/sports/football/roster", "card",
+  "North Carolina", "ACC", "https://goheels.com/sports/football/roster", "card",
+  "NC State",       "ACC", "https://gopack.com/sports/football/roster", "card",
+  "Pitt",           "ACC", "https://pittsburghpanthers.com/sports/football/roster", "card",
+  "SMU",            "ACC", "https://smumustangs.com/sports/football/roster", "card",
+  "Syracuse",       "ACC", "https://cuse.com/sports/football/roster", "card",
+  "California",     "ACC", "https://calbears.com/sports/football/roster", "card",
+  "Virginia Tech",  "ACC", "https://hokiesports.com/sports/football/roster", "list",
+  "Miami",          "ACC", "https://miamihurricanes.com/sports/football/roster?view=list", "list",
+  "Clemson",        "ACC", "https://clemsontigers.com/sports/football/roster?view=list", "list",
+  "Georgia Tech",   "ACC", "https://ramblinwreck.com/sports/m-footbl/roster?view=list", "list",
+  "Stanford",       "ACC", "https://gostanford.com/sports/football/roster?view=list", "list",
+  "Virginia",       "ACC", "https://virginiasports.com/sports/football/roster?view=list", "list",
+  # Big Ten
+  "Illinois",       "Big Ten", "https://fightingillini.com/sports/football/roster", "card",
+  "Indiana",        "Big Ten", "https://iuhoosiers.com/sports/football/roster", "card",
+  "Michigan",       "Big Ten", "https://mgoblue.com/sports/football/roster", "card",
+  "Maryland",       "Big Ten", "https://umterps.com/sports/football/roster", "card",
+  "Michigan State", "Big Ten", "https://msuspartans.com/sports/football/roster", "card",
+  "Ohio State",     "Big Ten", "https://ohiostatebuckeyes.com/sports/football/roster", "card",
+  "Rutgers",        "Big Ten", "https://scarletknights.com/sports/football/roster", "card",
+  "Oregon",         "Big Ten", "https://goducks.com/sports/football/roster", "card",
+  "USC",            "Big Ten", "https://usctrojans.com/sports/football/roster", "card",
+  "Washington",     "Big Ten", "https://gohuskies.com/sports/football/roster", "card",
+  "Wisconsin",      "Big Ten", "https://uwbadgers.com/sports/football/roster", "card",
+  "Minnesota",      "Big Ten", "https://gophersports.com/sports/football/roster", "card",
+  "Penn State",     "Big Ten", "https://gopsusports.com/sports/football/roster", "player_list",
+  "Nebraska",       "Big Ten", "https://huskers.com/sports/football/roster?view=list", "list",
+  "Iowa",           "Big Ten", "https://hawkeyesports.com/sports/football/roster", "list",
+  "Northwestern",   "Big Ten", "https://nusports.com/sports/football/roster", "list",
+  "Purdue",         "Big Ten", "https://purduesports.com/sports/football/roster", "list",
+  "UCLA",           "Big Ten", "https://uclabruins.com/sports/football/roster?view=list", "list",
+  # Big 12
+  "Arizona",        "Big 12", "https://arizonawildcats.com/sports/football/roster", "card",
+  "Baylor",         "Big 12", "https://baylorbears.com/sports/football/roster", "card",
+  "Colorado",       "Big 12", "https://cubuffs.com/sports/football/roster", "card",
+  "Houston",        "Big 12", "https://uhcougars.com/sports/football/roster", "card",
+  "Iowa State",     "Big 12", "https://cyclones.com/sports/football/roster", "card",
+  "Kansas",         "Big 12", "https://kuathletics.com/sports/football/roster/", "card",
+  "Kansas State",   "Big 12", "https://kstatesports.com/sports/football/roster", "card",
+  "Oklahoma State", "Big 12", "https://okstate.com/sports/football/roster", "card",
+  "TCU",            "Big 12", "https://gofrogs.com/sports/football/roster", "card",
+  "Texas Tech",     "Big 12", "https://texastech.com/sports/football/roster", "card",
+  "Utah",           "Big 12", "https://utahutes.com/sports/football/roster", "card",
+  "West Virginia",  "Big 12", "https://wvusports.com/sports/football/roster", "card",
+  "Arizona State",  "Big 12", "https://thesundevils.com/sports/football/roster?view=list", "list",
+  "Cincinnati",     "Big 12", "https://gobearcats.com/sports/football/roster", "list",
+  "UCF",            "Big 12", "https://ucfknights.com/sports/football/roster?view=list", "list",
+  "BYU",            "Big 12", "https://byucougars.com/sports/football/roster?view=list", "list",
+  # Conference USA
+  "Western Kentucky",   "Conference USA", "https://wkusports.com/sports/football/roster", "card",
+  "Delaware",           "Conference USA", "https://bluehens.com/sports/football/roster", "card",
+  "Jacksonville State", "Conference USA", "https://jaxstatesports.com/sports/football/roster", "card",
+  "Liberty",            "Conference USA", "https://libertyflames.com/sports/football/roster", "card",
+  "Missouri State",     "Conference USA", "https://missouristatebears.com/sports/football/roster", "card",
+  "Middle Tennessee",   "Conference USA", "https://goblueraiders.com/sports/football/roster", "card",
+  "Sam Houston",        "Conference USA", "https://gobearkats.com/sports/football/roster", "card",
+  "FIU",                "Conference USA", "https://fiusports.com/sports/football/roster", "sidearm",
+  "Kennesaw State",     "Conference USA", "https://ksuowls.com/sports/football/roster", "sidearm",
+  "New Mexico State",   "Conference USA", "https://nmstatesports.com/sports/football/roster", "sidearm",
+  # MAC
+  "Toledo",           "MAC", "https://utrockets.com/sports/football/roster", "card",
+  "UMass",            "MAC", "https://umassathletics.com/sports/football/roster", "card",
+  "Kent State",       "MAC", "https://kentstatesports.com/sports/football/roster", "card",
+  "Eastern Michigan", "MAC", "https://emueagles.com/sports/football/roster", "card",
+  "Central Michigan", "MAC", "http://cmuchippewas.com/sports/football/roster", "card",
+  "Buffalo",          "MAC", "https://ubbulls.com/sports/football/roster", "card",
+  "Bowling Green",    "MAC", "https://bgsufalcons.com/sports/football/roster", "card",
+  "Ball State",       "MAC", "https://ballstatesports.com/sports/football/roster", "card",
+  "Akron",            "MAC", "https://gozips.com/sports/football/roster", "card",
+  "Ohio",             "MAC", "https://ohiobobcats.com/sports/football/roster", "card",
+  "Miami University", "MAC", "https://miamiredhawks.com/sports/football/roster", "card",
+  "Sacramento State", "MAC", "https://hornetsports.com/sports/football/roster", "sidearm_raw",
+  "Western Michigan", "MAC", "https://wmubroncos.com/sports/football/roster", "sidearm_raw",
+  # Mountain West
+  "North Dakota State", "Mountain West", "https://gobison.com/sports/football/roster", "card",
+  "UNLV",               "Mountain West", "https://unlvrebels.com/sports/football/roster", "card",
+  "Wyoming",            "Mountain West", "https://gowyo.com/sports/football/roster", "card",
+  "Air Force",          "Mountain West", "https://goairforcefalcons.com/sports/football/roster", "card",
+  "New Mexico",         "Mountain West", "https://golobos.com/sports/football/roster?view=list", "list",
+  "San Jose State",     "Mountain West", "https://sjsuspartans.com/sports/football/roster?view=list", "list",
+  "Nevada",             "Mountain West", "https://nevadawolfpack.com/sports/football/roster", "sidearm",
+  "NIU",                "Mountain West", "https://niuhuskies.com/sports/football/roster", "sidearm",
+  "UC Davis",           "Mountain West", "https://ucdavisaggies.com/sports/football/roster", "sidearm",
+  "UTEP",               "Mountain West", "https://utepminers.com/sports/football/roster", "sidearm",
+  "Hawaii",             "Mountain West", "https://hawaiiathletics.com/sports/football/roster", "sidearm",
+  # Pac-12
+  "Boise State",      "Pac-12", "https://broncosports.com/sports/football/roster", "card",
+  "Colorado State",   "Pac-12", "https://csurams.com/sports/football/roster", "card",
+  "Fresno State",     "Pac-12", "https://gobulldogs.com/sports/football/roster", "card",
+  "Oregon State",     "Pac-12", "https://osubeavers.com/sports/football/roster", "card",
+  "San Diego State",  "Pac-12", "https://goaztecs.com/sports/football/roster", "list",
+  "Washington State", "Pac-12", "https://wsucougars.com/sports/football/roster", "list",
+  "Texas State",      "Pac-12", "https://txst.com/sports/football/roster", "sidearm_txst",
+  "Utah State",       "Pac-12", "https://utahstateaggies.com/sports/football/roster", "utah_state",
+  # SEC
+  "Georgia",           "SEC", "https://georgiadogs.com/sports/football/roster", "card",
+  "Mississippi State", "SEC", "https://hailstate.com/sports/football/roster", "card",
+  "Oklahoma",          "SEC", "https://soonersports.com/sports/football/roster", "card",
+  "Ole Miss",          "SEC", "https://olemisssports.com/sports/football/roster", "card",
+  "Texas",             "SEC", "https://texaslonghorns.com/sports/football/roster", "card",
+  "Tennessee",         "SEC", "https://utsports.com/sports/football/roster", "card",
+  "Florida",           "SEC", "https://floridagators.com/sports/football/roster", "card",
+  "Alabama",           "SEC", "https://rolltide.com/sports/football/roster", "card",
+  "Auburn",            "SEC", "https://auburntigers.com/sports/football/roster", "list",
+  "Missouri",          "SEC", "https://mutigers.com/sports/football/roster?view=list", "list",
+  "Texas A&M",         "SEC", "https://12thman.com/sports/football/roster?view=list", "list",
+  "Vanderbilt",        "SEC", "https://vucommodores.com/sports/football/roster?view=list", "list",
+  "LSU",               "SEC", "https://lsusports.net/sports/fb/roster?view=list", "list",
+  "Arkansas",          "SEC", "https://arkansasrazorbacks.com/sport/m-footbl/roster/", "list",
+  "Kentucky",          "SEC", "https://ukathletics.com/sports/football/roster/", "kentucky",
+  "South Carolina",    "SEC", "https://gamecocksonline.com/sports/football/roster/", "south_carolina",
+  # Sun Belt
+  "Georgia Southern", "Sun Belt", "https://gseagles.com/sports/football/roster", "card",
+  "Louisiana",        "Sun Belt", "https://ragincajuns.com/sports/football/roster", "card",
+  "Marshall",         "Sun Belt", "https://herdzone.com/sports/football/roster", "card",
+  "Southern Miss",    "Sun Belt", "https://southernmiss.com/sports/football/roster", "card",
+  "Louisiana Tech",   "Sun Belt", "https://latechsports.com/sports/football/roster", "card",
+  "Troy",             "Sun Belt", "https://troytrojans.com/sports/football/roster", "card",
+  "Coastal Carolina", "Sun Belt", "https://goccusports.com/sports/football/roster", "card",
+  "James Madison",    "Sun Belt", "https://jmusports.com/sports/football/roster", "card",
+  "App State",        "Sun Belt", "https://appstatesports.com/sports/football/roster", "sidearm_plain",
+  "Arkansas State",   "Sun Belt", "https://astateredwolves.com/sports/football/roster", "sidearm_plain",
+  "Georgia State",    "Sun Belt", "https://georgiastatesports.com/sports/football/roster", "sidearm_plain",
+  "South Alabama",    "Sun Belt", "https://usajaguars.com/sports/football/roster", "sidearm_plain",
+  "ULM",              "Sun Belt", "https://ulmwarhawks.com/sports/football/roster", "sidearm_plain",
+  "Old Dominion",     "Sun Belt", "https://odusports.com/sports/football/roster", "wmt_table",
+  # FBS Independents
+  "Notre Dame", "FBS Independent", "https://fightingirish.com/sports/football/roster", "notre_dame",
+  "UConn",      "FBS Independent", "https://uconnhuskies.com/sports/football/roster", "card"
+)
+
+# Quick test: uncomment to run just a few schools before the full ~10+ minute run
+# schools = dplyr::filter(schools, school %in% c("LSU", "James Madison"))
+
+# ---- Scrape one school: assigned parser -> auto-detect -> retry ------------
+# Pages filled in by JavaScript are loaded through Chrome: always for
+# live_parsers, and as a last-attempt fallback for every other school.
+live_parsers = c("utah_state")
+
+fetch_and_parse = function(url, parser, live = FALSE) {
+  page = if (live) rvest::read_html_live(url) else rvest::read_html(url)
+  if (live) {
+    on.exit(try(page$session$close(), silent = TRUE), add = TRUE)
+    Sys.sleep(5)
+  }
+  out = tryCatch(parsers[[parser]](page), error = function(e) NULL)
+  if (is.null(out) || nrow(out) == 0) out = parse_auto(page)
+  out
+}
+
+scrape_school = function(school, conference, url, parser, tries = 3) {
+  for (attempt in seq_len(tries)) {
+    live = parser %in% live_parsers || attempt == tries
+    out = tryCatch(fetch_and_parse(url, parser, live), error = function(e) {
+      message("  ", school, " (attempt ", attempt, if (live) ", live" else "", "): ", conditionMessage(e))
+      NULL
+    })
+    if (!is.null(out) && nrow(out) > 0) {
+      message(sprintf("%-20s %-16s %3d players", school, conference, nrow(out)))
+      return(dplyr::mutate(out, school = school, conference = conference, .before = 1))
+    }
+    Sys.sleep(3 * attempt)
+  }
+  warning(school, " could not be scraped: ", url, call. = FALSE)
+  NULL
+}
+
+# ---- Run everything --------------------------------------------------------
+hs_pattern = "(\\bHS|H\\.S\\.|High School|Academy|Prep)$"
+
+fbs_rosters = purrr::pmap(schools, function(school, conference, url, parser) {
+  res = scrape_school(school, conference, url, parser)
+  Sys.sleep(2)
+  res
+}) |>
+  dplyr::bind_rows() |>
+  dplyr::mutate(
+    dplyr::across(tidyselect::everything(),
+                  ~ stringr::str_squish(stringr::str_remove_all(as.character(.x), "\\[|\\]"))),
+
+    # Position: strip labels, captain tags, and stats glued onto the position
+    position = position |>
+      stringr::str_remove("^Position\\s*") |>
+      stringr::str_remove("\\s*Is Captain \\(C\\)$") |>
+      stringr::str_remove("\\s+\\d.*$"),                       # "WR 5'11\" 195 lbs ..." -> "WR"
+    position = dplyr::if_else(stringr::str_detect(position, "[a-z].*\\s[A-Z/]{1,6}$"),
+                              stringr::str_extract(position, "[A-Z/]{1,6}$"),   # "Defensive Back DB" -> "DB"
+                              position),
+    position = stringr::str_replace(position, "^(\\S+) \\1$", "\\1"),          # "OL OL" -> "OL"
+
+    year   = stringr::str_remove(year, "^(Academic Year|Year|Class)\\s*"),
+    height = stringr::str_remove(height, "^(Height|Ht\\.?|HT)\\s*"),
+    height = dplyr::if_else(stringr::str_detect(height, "^\\d"), height, NA_character_),
+
+    # Height in inches from any format (6' 2'', 6′2″, 6-2, 6'2")
+    height_in = {
+      m = stringr::str_match(height, "^(\\d)\\D+(\\d{1,2}(?:\\.\\d+)?)")
+      as.numeric(m[, 2]) * 12 + as.numeric(m[, 3]) + dplyr::if_else(stringr::str_detect(height, "½|1/2"), 0.5, 0)
+    },
+
+    weight_lbs = suppressWarnings(as.numeric(stringr::str_extract(weight_lbs, "\\d+"))),
+    weight_lbs = dplyr::if_else(weight_lbs >= 120 & weight_lbs <= 450, weight_lbs, NA_real_),
+
+    # Previous school: colleges only
+    previous_school = dplyr::if_else(school == "Arkansas",       # Arkansas lists "High School / College"
+                                     stringr::str_squish(stringr::str_extract(previous_school, "(?<=/).*$")),
+                                     previous_school),
+    previous_school = dplyr::if_else(stringr::str_detect(previous_school, hs_pattern),
+                                     NA_character_, previous_school),
+
+    dplyr::across(tidyselect::where(is.character), ~ dplyr::na_if(.x, ""))
+  ) |>
+  # Drop non-players: Team IMPACT members, memorial cards, honorary captains
+  dplyr::filter(!stringr::str_detect(name, "^In Memory"),
+                is.na(position) | !position %in% c("IMPACT", "Team IMPACT", "Captain")) |>
+  dplyr::relocate(height_in, .after = height)
+
+# ---- Validation: did every team come through cleanly? ----------------------
+school_summary = fbs_rosters |>
+  dplyr::group_by(conference, school) |>
+  dplyr::summarise(
+    players         = dplyr::n(),
+    pct_na_position = round(mean(is.na(position)) * 100),
+    pct_na_year     = round(mean(is.na(year)) * 100),
+    pct_na_height   = round(mean(is.na(height_in)) * 100),
+    pct_na_weight   = round(mean(is.na(weight_lbs)) * 100),
+    pct_na_hometown = round(mean(is.na(hometown_city)) * 100),
+    long_positions  = sum(nchar(position) > 20, na.rm = TRUE),  # catches merged text
+    .groups = "drop"
+  )
+
+missing_schools = setdiff(schools$school, school_summary$school)
+suspicious = school_summary |>
+  dplyr::filter(players < 70 | players > 200 |
+                  pct_na_position > 10 | pct_na_year > 10 |
+                  pct_na_height > 10 | pct_na_weight > 10 |
+                  pct_na_hometown > 25 | long_positions > 0)
+
+if (length(missing_schools) > 0) {
+  warning("NOT scraped: ", paste(missing_schools, collapse = ", "), call. = FALSE)
+} else {
+  message("All ", nrow(schools), " schools scraped (", nrow(fbs_rosters), " players).")
+}
+if (nrow(suspicious) > 0) {
+  message("Check these schools:")
+  print(suspicious, n = Inf)
+}
+
+print(dplyr::count(fbs_rosters, conference))
+```
+
+## Source 2: American Community Survey (API)
+
+What one row is: [ ]
+
+```{r}
+
+```
+
+## Source 3: Collegefootballdata.com (API)
+
+What one row is: Each row is a player for a season, with one column per statistic.
+
+```{r}
+get_cfbd_data = function(endpoint, query_params = list()) {
+  api_key = Sys.getenv("CFBD_API_KEY")
+  if (api_key == "") stop("CFBD_API_KEY environment variable is not set. Check your .Renviron.")
+
+  httr2::request(paste0("https://api.collegefootballdata.com", endpoint)) |>
+    httr2::req_headers(
+      Authorization = paste("Bearer", api_key),
+      Accept        = "application/json"
+    ) |>
+    httr2::req_url_query(!!!query_params) |>
+    httr2::req_retry(max_tries = 3, backoff = ~ 2) |>   # retries if rate-limited or dropped
+    httr2::req_perform() |>
+    httr2::resp_body_json(simplifyVector = TRUE)        # JSON -> data frame
+}
+
+target_years = 2026
+
+# Wide format: one row = one player, one column per stat (e.g. passing_yds, rushing_td)
+cfbd_player_stats = player_season_stats |>
+  dplyr::mutate(
+    stat_name = stringr::str_to_lower(paste(category, statType, sep = "_")) |>
+      stringr::str_replace_all("[^a-z0-9]+", "_"),
+    stat = suppressWarnings(as.numeric(stat))
+  ) |>
+  tidyr::pivot_wider(
+    id_cols     = tidyselect::any_of(c("season", "playerId", "player", "team", "conference", "position")),
+    names_from  = stat_name,
+    values_from = stat,
+    values_fn   = dplyr::first                          # guards against rare duplicate rows
+  ) |>
+  dplyr::rename(name = player, school = team, player_id = playerId) |>
+  dplyr::relocate(school, conference, name, position, .after = season) |>
+  dplyr::arrange(conference, school, name)
+
+message(nrow(player_season_stats), " stat rows -> ", nrow(cfbd_player_stats), " players, ",
+        ncol(cfbd_player_stats), " columns")
+dplyr::glimpse(cfbd_player_stats)
+```
+
+## Save the raw data
+
+```{r}
+raw_dir = "../data/raw"
+
+write.csv(fbs_rosters,
+          file.path(raw_dir, "fbs_rosters.csv"),
+          row.names = FALSE)
+write.csv(player_season_stats,
+          file.path(raw_dir, "cfbd_player_stats_long.csv"),
+          row.names = FALSE)
+write.csv(cfbd_player_stats,
+          file.path(raw_dir, "cfbd_player_stats.csv"),
+          row.names = FALSE)
+```
+
