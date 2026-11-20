@@ -649,48 +649,36 @@ print(dplyr::count(fbs_rosters, conference))
 write.csv(fbs_rosters, "fbs_rosters.csv", row.names = FALSE)
 ```
 
-## Source 2: [American Community Survey] (API)
+## Source 2: American Community Survey (API)
 
 What one row is: [ ]
 
-## Source 3: [Collegefootballdata.com] (API)
+## Source 3: Collegefootballdata.com (API)
 
-
-What one row is: For Player_Usage, one row is one player. For Player_Season_Stats, one row is one statistic for a player
+What one row is: For Player_Season_Stats, one row is one statistic for a player.
 
 ```{r}
-get_cfbd_data <- function(endpoint, query_params = list()) {
-  base_url <- "https://api.collegefootballdata.com"
-  api_key <- Sys.getenv("CFBD_API_KEY")
-  
-  if (api_key == "") {
-    stop("CFBD_API_KEY environment variable is not set. Check your .Renviron.")
-  }
-  
-  req <- request(paste0(base_url, endpoint)) %>%
-    req_headers(
-      "Authorization" = paste("Bearer", api_key),
-      "Accept" = "application/json"
-    ) %>%
-    req_url_query(!!!query_params) %>%
-    req_retry(max_tries = 3, backoff = ~ 2) # Automatically retries if rate-limited or dropped
-  
-  resp <- req_perform(req)
-  
-  # Parse JSON into a flat data frame automatically
-  resp_body_json(resp, simplifyVector = TRUE)
+get_cfbd_data = function(endpoint, query_params = list()) {
+  api_key = Sys.getenv("CFBD_API_KEY")
+  if (api_key == "") stop("CFBD_API_KEY environment variable is not set. Check your .Renviron.")
+
+  httr2::request(paste0("https://api.collegefootballdata.com", endpoint)) |>
+    httr2::req_headers(
+      Authorization = paste("Bearer", api_key),
+      Accept        = "application/json"
+    ) |>
+    httr2::req_url_query(!!!query_params) |>
+    httr2::req_retry(max_tries = 3, backoff = ~ 2) |>   # retries if rate-limited or dropped
+    httr2::req_perform() |>
+    httr2::resp_body_json(simplifyVector = TRUE)        # JSON -> data frame
 }
 
-target_years <- 2026
+target_years = 2026
 
+player_season_stats = purrr::map(target_years, ~ get_cfbd_data("/stats/player/season", list(year = .x))) |>
+  dplyr::bind_rows()
 
-player_usage <- map_dfr(target_years, ~ {
-  get_cfbd_data("/player/usage", list(year = .x))
-})
-
-player_season_stats <- map_dfr(target_years, ~ {
-  get_cfbd_data("/stats/player/season", list(year = .x))
-})
+dplyr::glimpse(player_season_stats)
 ```
 
 ## Save the raw data
@@ -698,10 +686,6 @@ player_season_stats <- map_dfr(target_years, ~ {
 Write each source to `../data/raw/`.
 
 ```{r}
-
-
-#Source 3:
-
 dir.create("../data/raw", recursive = TRUE, showWarnings = FALSE)
 # Flatten nested list-columns so write_csv() succeeds
 player_usage_flat <- player_usage %>%
