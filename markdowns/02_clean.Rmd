@@ -13,12 +13,15 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ## Read the raw data
 ```{r}
 fbs_rosters <- readr::read_csv("../data/raw/fbs_rosters.csv")
-#Source 2
-# Source 3
+
+census_geography_2024 <- readr::read_csv("../data/raw/census_geography_2024.csv")
+
+cfbd_player_stats <- readr::read_csv("../data/raw/cfbd_player_stats.csv")
 ```
 
 ## Clean each source
 
+### Source 1
 ```{r}
 fbs_rosters_raw = readr::read_csv("../data/raw/fbs_rosters.csv", show_col_types = FALSE)
 
@@ -271,6 +274,232 @@ message("Unrecognized hometowns: ",
                                        as.character(fbs_rosters_clean$hometown_country))), collapse = " | "))
 ```
 
+### Source 2
+
+```{r}
+# ---- Place-name cleaning ------------------------------------------------------
+# Census place names look like "Abbeville city, Alabama". The city name, the
+# place type, and the state are three variables, so they are split apart.
+place_types = c("city and borough", "unified government", "consolidated government",
+                "metropolitan government", "metro government", "metro township", "urban county",
+                "zona urbana", "comunidad", "municipality", "corporation",
+                "borough", "village", "town", "city", "CDP")
+consolidated_types = c("unified government", "consolidated government", "metropolitan government",
+                       "metro government", "urban county")
+type_pattern = paste0("\\s(", paste(place_types, collapse = "|"), ")$")
+
+census_clean = census_geography_2024 |>
+  dplyr::mutate(
+    # 1. Drop the state ("Abbeville city, Alabama" -> "Abbeville city"); state is already in state_abbr
+    name = stringr::str_remove(name, ",\\s*[^,]+$"),
+
+    # 2. Places only: drop county disambiguation, e.g. "Mount Olive CDP (Coosa County)" -> "Mount Olive CDP"
+    name = dplyr::if_else(geography_level == "place",
+                          stringr::str_remove(name, "\\s*\\((?!balance)[^)]*\\)$"), name),
+    balance = geography_level == "place" & stringr::str_detect(name, "\\(balance\\)"),
+    name    = stringr::str_remove(name, "\\s*\\(balance\\)$"),
+
+    # 3. Split off the place type ("Abbeville city" -> name "Abbeville", place_type "city")
+    place_type = dplyr::if_else(geography_level == "place",
+                                stringr::str_match(name, type_pattern)[, 2], NA_character_),
+    name = dplyr::if_else(!is.na(place_type), stringr::str_remove(name, type_pattern), name),
+
+    # 4. Consolidated city-counties -> the city ("Louisville/Jefferson County" -> "Louisville",
+    #    "Nashville-Davidson" -> "Nashville"). Real hyphenated cities (Winston-Salem) are untouched.
+    consolidated = geography_level == "place" &
+      (place_type %in% consolidated_types |
+         (is.na(place_type) & (balance | stringr::str_detect(name, "[-/].*County$")))),
+    name = dplyr::if_else(consolidated, stringr::str_remove(name, "[-/].*$"), name),
+
+    # 5. Census writes "Legal name (common name)"; keep the common name
+    #    ("San Buenaventura (Ventura)" -> "Ventura", "El Paso de Robles (Paso Robles)" -> "Paso Robles")
+    name = dplyr::if_else(geography_level == "place" & stringr::str_detect(name, "\\([^)]+\\)$"),
+                          stringr::str_match(name, "\\(([^)]+)\\)$")[, 2], name),
+
+    # 6. Two large cities whose Census names differ from everyday usage
+    name = dplyr::case_when(
+      geography_level == "place" & name == "Urban Honolulu"                    ~ "Honolulu",
+      geography_level == "place" & name == "Boise City" & state_abbr == "ID"   ~ "Boise",
+      TRUE ~ stringr::str_squish(name)
+    )
+  )
+
+# ---- County names: one consistent format ("Chambers County") for every row --------
+# County rows now hold "Autauga County"; place rows held only "Chambers" from the boundary file.
+county_names = census_clean |>
+  dplyr::filter(geography_level == "county") |>
+  dplyr::select(county_geoid = geoid, county_name_clean = name)
+
+census_clean = census_clean |>
+  dplyr::left_join(county_names, by = "county_geoid") |>
+  dplyr::mutate(
+    county_name = county_name_clean,
+
+    # ---- Values that are technically incorrect as reported ----
+    # ACS codes medians outside its published range as 2,499 (= "under $2,500") and
+    # 250,001 (= "over $250,000"). Keep the boundary value and flag it.
+    median_income_censored = dplyr::case_when(
+      median_income == 2499   ~ "Bottom-coded (under $2,500)",
+      median_income == 250001 ~ "Top-coded (over $250,000)"
+    ),
+    median_income = dplyr::case_when(
+      median_income == 2499   ~ 2500,
+      median_income == 250001 ~ 250000,
+      TRUE ~ median_income
+    ),
+    median_age = dplyr::na_if(median_age, 0),                     # one place reported a median age of 0
+
+    # ---- Requested rounding: race/ethnicity percentages to 4 decimal places ----
+    dplyr::across(c(pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race), ~ round(.x, 4)),
+
+    # ---- Types ----
+    geography_level        = factor(geography_level, levels = c("place", "county")),
+    place_type             = factor(place_type),
+    state_abbr             = factor(state_abbr),
+    county_match_status    = factor(county_match_status),
+    median_income_censored = factor(median_income_censored),
+    population             = as.integer(population),          # whole people
+    county_count           = as.integer(county_count),
+    multiple_counties      = as.logical(multiple_counties)
+  ) |>
+  dplyr::select(
+    geography_level, geoid, name, place_type, state_abbr,
+    population, median_age, pct_male,
+    pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race,
+    median_income, median_income_censored, poverty_rate, bachelors_or_higher,
+    longitude, latitude, land_area_sqmi, population_density,
+    county_geoid, county_name, county_count, multiple_counties, county_match_status
+  )
+
+# ---- Checks ---------------------------------------------------------------------
+message("Rows: ", nrow(census_clean), " (", paste(names(table(census_clean$geography_level)),
+        table(census_clean$geography_level), collapse = ", "), ")")
+message("Duplicate GEOIDs: ", sum(duplicated(census_clean[c("geography_level", "geoid")])))
+message("Place names still containing a type, state, or parenthesis: ",
+        sum(census_clean$geography_level == "place" &
+              stringr::str_detect(census_clean$name, paste0(type_pattern, "|,|\\("))))
+message("Race shares that don't sum to ~100: ",
+        sum(abs(rowSums(dplyr::select(census_clean, pct_white:pct_other_race)) - 100) > 0.01, na.rm = TRUE))
+```
+
+### Source 3
+
+```{r}
+# Reuse Source 1 objects so positions, schools and conferences match the roster exactly
+if (!exists("clean_position") || !exists("fbs_rosters_clean")) {
+  stop("Run the Source 1 cleaning chunk first: it defines clean_position() and fbs_rosters_clean.")
+}
+position_lookup["G"] = "Offensive Guard"                  # only CFBD code missing from the Source 1 lookup
+
+id_cols   = c("season", "player_id", "school", "conference", "name", "position")
+stat_cols = setdiff(names(cfbd_player_stats), id_cols)
+
+# ---- School names: CFBD -> Source 1 roster names ----------------------------------
+cfbd_school_map = c(
+  "Florida Atlantic"      = "FAU",
+  "Florida International" = "FIU",
+  "Hawai'i"               = "Hawaii",
+  "Massachusetts"         = "UMass",
+  "Miami (OH)"            = "Miami University",
+  "Northern Illinois"     = "NIU",
+  "Pittsburgh"            = "Pitt",
+  "San José State"        = "San Jose State",
+  "South Florida"         = "USF",
+  "UL Monroe"             = "ULM"
+)
+
+# Conference for each school, taken from the roster so both sources agree
+roster_conference = fbs_rosters_clean |>
+  dplyr::distinct(school, conference) |>
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
+
+# ---- Column names that state their units ------------------------------------------
+rename_units = function(x) {
+  x |>
+    # Specific names first (clearer than the generic rule would give)
+    stringr::str_replace("^passing_pct$",  "completion_percent") |>
+    stringr::str_replace("^kicking_pct$",  "field_goal_percent") |>
+    stringr::str_replace("^kicking_long$", "field_goal_longest_yards") |>
+    stringr::str_replace("^kickreturns_", "kick_returns_") |>
+    stringr::str_replace("^puntreturns_", "punt_returns_") |>
+    # Distances (yards)
+    stringr::str_replace("_yds$",  "_yards") |>
+    stringr::str_replace("_long$", "_longest_yards") |>
+    # Rates (yards per event)
+    stringr::str_replace("_ypa$", "_yards_per_attempt") |>
+    stringr::str_replace("_ypc$", "_yards_per_carry") |>
+    stringr::str_replace("_ypr$", "_yards_per_reception") |>
+    stringr::str_replace("_ypp$", "_yards_per_punt") |>
+    stringr::str_replace("_avg$", "_yards_per_return") |>
+    # Counts
+    stringr::str_replace("^passing_att$",       "passing_attempts") |>
+    stringr::str_replace("^rushing_car$",       "rushing_carries") |>
+    stringr::str_replace("^receiving_rec$",     "receptions") |>
+    stringr::str_replace("^fumbles_fum$",       "fumbles") |>
+    stringr::str_replace("^fumbles_rec$",       "fumbles_recovered") |>
+    stringr::str_replace("^defensive_tot$",     "tackles_total") |>
+    stringr::str_replace("^defensive_solo$",    "tackles_solo") |>
+    stringr::str_replace("^defensive_tfl$",     "tackles_for_loss") |>
+    stringr::str_replace("^defensive_sacks$",   "sacks") |>
+    stringr::str_replace("^defensive_qb_hur$",  "qb_hurries") |>
+    stringr::str_replace("^defensive_pd$",      "passes_defended") |>
+    stringr::str_replace("^interceptions_int$", "interceptions") |>
+    stringr::str_replace("^kicking_fgm$",       "field_goals_made") |>
+    stringr::str_replace("^kicking_fga$",       "field_goals_attempted") |>
+    stringr::str_replace("^kicking_xpm$",       "extra_points_made") |>
+    stringr::str_replace("^kicking_xpa$",       "extra_points_attempted") |>
+    stringr::str_replace("^kicking_pts$",       "kicking_points") |>
+    stringr::str_replace("^punting_no$",        "punts") |>
+    stringr::str_replace("^punting_in_20$",     "punts_inside_20") |>
+    stringr::str_replace("^punting_tb$",        "punting_touchbacks") |>
+    stringr::str_replace("^(kick|punt)_returns_no$", "\\1_returns") |>
+    stringr::str_replace("_td$",  "_touchdowns") |>
+    stringr::str_replace("_int$", "_interceptions")
+}
+
+# ---- Clean ----------------------------------------------------------------------
+player_stats_clean = cfbd_player_stats |>
+  dplyr::mutate(
+    # Roster school names, then keep only the 139 schools in the Source 1 roster
+    school = dplyr::coalesce(unname(cfbd_school_map[school]), school)
+  ) |>
+  dplyr::filter(school %in% roster_conference$school) |>
+  dplyr::select(-conference) |>
+  dplyr::left_join(roster_conference, by = "school") |>
+  dplyr::mutate(
+    # Positions spelled out exactly like Source 1 ("WR" -> "Wide Receiver")
+    position = clean_position(dplyr::na_if(stringr::str_squish(position), "?")),
+
+    # Percentages: CFBD reports proportions (0.654) -> percent (65.4)
+    dplyr::across(c(passing_pct, kicking_pct), ~ .x * 100),
+
+    # Whole-number stats (yards, touchdowns, attempts) -> integer; stats with
+    # fractions (half sacks/TFLs, rates, percentages) stay double
+    dplyr::across(tidyselect::all_of(stat_cols),
+                  ~ if (all(.x == round(.x), na.rm = TRUE)) as.integer(.x) else as.numeric(.x)),
+
+    # Identifier types
+    season     = as.integer(season),
+    school     = factor(school, levels = levels(fbs_rosters_clean$school)),
+    conference = factor(conference, levels = levels(fbs_rosters_clean$conference)),
+    position   = factor(position)
+  ) |>
+  dplyr::rename_with(rename_units, tidyselect::all_of(stat_cols)) |>
+  dplyr::relocate(season, player_id, school, conference, name, position) |>
+  dplyr::arrange(conference, school, name)
+
+# ---- Checks ---------------------------------------------------------------------
+message("Players: ", nrow(player_stats_clean), " | Schools: ", dplyr::n_distinct(player_stats_clean$school), " of ",
+        nlevels(fbs_rosters_clean$school), " | Columns: ", ncol(player_stats_clean))
+message("Roster schools with no CFBD stats: ",
+        paste(setdiff(levels(fbs_rosters_clean$school), as.character(player_stats_clean$school)), collapse = ", "))
+message("Duplicate player-seasons: ", sum(duplicated(player_stats_clean[c("season", "player_id")])))
+message("Unrecognized positions: ", sum(is.na(player_stats_clean$position)))
+message("Percent columns outside 0-100: ",
+        sum(sapply(dplyr::select(player_stats_clean, tidyselect::ends_with("_percent")),
+                   function(x) any(x < 0 | x > 100, na.rm = TRUE))))
+```
+
 ## Save the cleaned data
 
 Write to `../data/processed/`.
@@ -281,5 +510,13 @@ processed_dir = "../data/processed"
 
 write.csv(fbs_rosters_clean, 
           file.path(processed_dir, "fbs_rosters_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(census_clean,
+          file.path(processed_dir, "census_geography_2024_clean.csv"),
+          row.names = FALSE)
+
+write.csv(player_stats_clean,
+          file.path(processed_dir, "player_stats_clean.csv"),
           row.names = FALSE)
 ```
