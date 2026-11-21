@@ -943,10 +943,24 @@ city_county_lookup %>%
   )
 
 
-# CONSOLIDATE CENSUS PLACES AND COUNTIES
+# CONSOLIDATE CITY AND COUNTY DATA
 
-# Standardize place-level data
-census_places_final <- census_places %>%
+# Prepare county-level variables for joining
+county_data_for_join <- census_counties %>%
+  transmute(
+    county_geoid = GEOID,
+    county_population = populationE,
+    county_median_income = median_incomeE,
+    county_poverty_rate = poverty_rate,
+    county_bachelors_or_higher = bachelors_or_higher,
+    county_longitude = longitude,
+    county_latitude = latitude,
+    county_land_area_sqmi = land_area_sqmi,
+    county_population_density = population_density
+  )
+
+# Combine place demographics, county assignments, and county demographics
+census_geography <- census_places %>%
   left_join(
     city_county_lookup %>%
       select(
@@ -959,68 +973,47 @@ census_places_final <- census_places %>%
       ),
     by = c("GEOID" = "city_geoid")
   ) %>%
+  left_join(
+    county_data_for_join,
+    by = "county_geoid"
+  ) %>%
   transmute(
-    geography_level = "place",
-    geoid = GEOID,
-    name = NAME,
+    city_geoid = GEOID,
+    city_name = NAME,
     state_abbr,
-    population = populationE,
-    median_income = median_incomeE,
-    poverty_rate,
-    bachelors_or_higher = NA_real_,
-    longitude,
-    latitude,
-    land_area_sqmi = NA_real_,
-    population_density = NA_real_,
+    city_population = populationE,
+    city_median_income = median_incomeE,
+    city_poverty_rate = poverty_rate,
+    city_longitude = longitude,
+    city_latitude = latitude,
     county_geoid,
     county_name,
+    county_population,
+    county_median_income,
+    county_poverty_rate,
+    county_bachelors_or_higher,
+    county_longitude,
+    county_latitude,
+    county_land_area_sqmi,
+    county_population_density,
     county_count,
     multiple_counties,
     county_match_status
   )
 
-# Standardize county-level data
-census_counties_final <- census_counties %>%
-  transmute(
-    geography_level = "county",
-    geoid = GEOID,
-    name = NAME,
-    state_abbr = NA_character_,
-    population = populationE,
-    median_income = median_incomeE,
-    poverty_rate,
-    bachelors_or_higher,
-    longitude,
-    latitude,
-    land_area_sqmi,
-    population_density,
-    county_geoid = GEOID,
-    county_name = NAME,
-    county_count = NA_integer_,
-    multiple_counties = NA,
-    county_match_status = NA_character_
-  )
-
-# Combine both geography levels
-census_geography <- bind_rows(
-  census_places_final,
-  census_counties_final
-)
-
-# Validate combined dataset
-census_geography %>%
-  count(geography_level)
-
+# Validate the final city-centered dataset
 census_geography %>%
   summarise(
-    total_records = n(),
-    missing_coordinates = sum(is.na(longitude) | is.na(latitude)),
-    duplicate_geographies = sum(
-      duplicated(paste(geography_level, geoid))
-    )
+    total_cities = n(),
+    missing_county_data = sum(is.na(county_population)),
+    missing_city_coordinates = sum(
+      is.na(city_longitude) | is.na(city_latitude)
+    ),
+    duplicate_city_geoids = sum(duplicated(city_geoid)),
+    multi_county_cities = sum(multiple_counties)
   )
 
-# Save one consolidated CSV
+# Save the consolidated CSV
 write_csv(
   census_geography,
   file.path(census_output_dir, "census_geography_2024.csv")
