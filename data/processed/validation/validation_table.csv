@@ -1,0 +1,97 @@
+table,column,source_table,expected_type,observed_type,type_ok,nullable,n_missing,pct_missing,min_allowed,max_allowed,observed_min,observed_max,allowed_values,foreign_key,rules,rows_flagged,status
+fbs_players_merged,school,fbs_rosters_clean,factor,factor,TRUE,FALSE,0,0,NA,NA,NA,NA,139 FBS schools,NA,"1, 2, 38, 42, 50",0,Pass
+fbs_players_merged,conference,fbs_rosters_clean,factor,factor,TRUE,FALSE,0,0,NA,NA,NA,NA,11 FBS conferences,NA,"1, 2, 13, 38",0,Pass
+fbs_players_merged,name,fbs_rosters_clean,character,character,TRUE,FALSE,0,0,NA,NA,NA,NA,NA,NA,"1, 2, 42, 45, 50",0,Pass
+fbs_players_merged,year,fbs_rosters_clean,factor,factor,TRUE,TRUE,107,0.7,NA,NA,NA,NA,1-8,NA,"1, 14",0,Pass
+fbs_players_merged,position,fbs_rosters_clean,factor,factor,TRUE,FALSE,0,0,NA,NA,NA,NA,Spelled-out positions,NA,"1, 2, 15, 42, 45, 50, 52",88,Fail
+fbs_players_merged,player_id,player_stats_clean,character,character,TRUE,TRUE,7306,46.4,NA,NA,NA,NA,Digits only,player_stats_clean.player_id,"1, 20, 24, 37, 41",0,Pass
+fbs_players_merged,match_method,Merge (derived),factor,factor,TRUE,TRUE,7306,46.4,NA,NA,NA,NA,Exact name; First initial + last name,NA,"1, 21, 37",0,Pass
+fbs_players_merged,season,player_stats_clean,whole number,numeric,TRUE,TRUE,7306,46.4,2026,2026,2026,2026,NA,NA,"1, 5",0,Pass
+fbs_players_merged,height_in,fbs_rosters_clean,numeric,numeric,TRUE,TRUE,222,1.4,60,95,65,83,NA,NA,"1, 3, 61",14,Fail
+fbs_players_merged,weight_lbs,fbs_rosters_clean,whole number,numeric,TRUE,TRUE,222,1.4,100,5000,135,385,NA,NA,"1, 4, 60",88,Fail
+fbs_players_merged,hometown_city,fbs_rosters_clean,character,character,TRUE,TRUE,8,0.1,NA,NA,NA,NA,NA,NA,"1, 42, 50, 58",780,Fail
+fbs_players_merged,hometown_state,fbs_rosters_clean,factor,factor,TRUE,TRUE,234,1.5,NA,NA,NA,NA,USPS code (US) or province name,NA,"1, 16, 18, 58",780,Fail
+fbs_players_merged,hometown_country,fbs_rosters_clean,factor,factor,TRUE,TRUE,13,0.1,NA,NA,NA,NA,ISO 3166 country name,NA,"1, 17",0,Pass
+fbs_players_merged,previous_school_1,fbs_rosters_clean,character,character,TRUE,TRUE,10853,68.9,NA,NA,NA,NA,NA,NA,1,0,Pass
+fbs_players_merged,previous_school_2,fbs_rosters_clean,character,character,TRUE,TRUE,15139,96.1,NA,NA,NA,NA,NA,NA,1,0,Pass
+fbs_players_merged,previous_school_3,fbs_rosters_clean,character,character,TRUE,TRUE,15656,99.4,NA,NA,NA,NA,NA,NA,1,0,Pass
+fbs_players_merged,previous_school_4,fbs_rosters_clean,character,logical,FALSE,TRUE,15748,100,NA,NA,NA,NA,NA,NA,1,0,Fail
+fbs_players_merged,hometown_geoid,census_geography_2024_clean,character,character,TRUE,TRUE,1105,7,NA,NA,NA,NA,7-digit place FIPS,census_geography_2024_clean.geoid (place),"1, 18, 19, 25, 58",780,Fail
+fbs_players_merged,hometown_place_type,census_geography_2024_clean,factor,factor,TRUE,TRUE,1120,7.1,NA,NA,NA,NA,Census place types,NA,"1, 22",0,Pass
+fbs_players_merged,hometown_population,census_geography_2024_clean,whole number,numeric,TRUE,TRUE,1105,7,0,10000000,0,8483844,NA,NA,"1, 9, 56",2,Fail
+fbs_players_merged,hometown_median_age,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1108,7,10,100,17.9,82.4,NA,NA,"1, 8",0,Pass
+fbs_players_merged,hometown_pct_male,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,88.6781609195402,NA,NA,"1, 6",0,Pass
+fbs_players_merged,hometown_pct_white,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,100,NA,NA,"1, 6, 39",0,Pass
+fbs_players_merged,hometown_pct_black,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,98.7059,NA,NA,"1, 6, 39",0,Pass
+fbs_players_merged,hometown_pct_asian,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,71.4704,NA,NA,"1, 6, 39",0,Pass
+fbs_players_merged,hometown_pct_hispanic,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,97.1383,NA,NA,"1, 6, 39",0,Pass
+fbs_players_merged,hometown_pct_other_race,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,87.538,NA,NA,"1, 6, 39",0,Pass
+fbs_players_merged,hometown_median_income,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1132,7.2,2500,250000,15039,250000,NA,NA,"1, 7, 40",0,Pass
+fbs_players_merged,hometown_median_income_censored,census_geography_2024_clean,factor,factor,TRUE,TRUE,15682,99.6,NA,NA,NA,NA,Bottom-coded; Top-coded,NA,"1, 23, 40",0,Pass
+fbs_players_merged,hometown_poverty_rate,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,74.4845360824742,NA,NA,"1, 6",0,Pass
+fbs_players_merged,hometown_bachelors_or_higher,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1107,7,0,100,0,100,NA,NA,"1, 6",0,Pass
+fbs_players_merged,hometown_longitude,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,-180,-64,-159.348630665023,-70.6082501398123,NA,NA,"1, 10",0,Pass
+fbs_players_merged,hometown_latitude,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,17,72,19.6804480283419,68.1499824786421,NA,NA,"1, 10",0,Pass
+fbs_players_merged,hometown_land_area_sqmi,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,0,5000,0.13534926998353,1707.06855732493,NA,NA,"1, 9",0,Pass
+fbs_players_merged,hometown_population_density,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,0,100000,0,51641.426142754,NA,NA,"1, 9",0,Pass
+fbs_players_merged,hometown_county_geoid,census_geography_2024_clean,character,character,TRUE,TRUE,1105,7,NA,NA,NA,NA,5-digit county FIPS,census_geography_2024_clean.geoid (county),"1, 19, 26",0,Pass
+fbs_players_merged,hometown_county_name,census_geography_2024_clean,character,character,TRUE,TRUE,1105,7,NA,NA,NA,NA,NA,NA,1,0,Pass
+fbs_players_merged,hometown_county_population,census_geography_2024_clean,whole number,numeric,TRUE,TRUE,1105,7,0,11000000,2295,9808667,NA,NA,"1, 9",0,Pass
+fbs_players_merged,hometown_county_median_income,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,2500,250000,28380,181765,NA,NA,"1, 7",0,Pass
+fbs_players_merged,hometown_county_poverty_rate,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,0,100,1.41594304936243,40.1388321763985,NA,NA,"1, 6",0,Pass
+fbs_players_merged,hometown_county_bachelors_or_higher,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,0,100,6.77323420074349,77.0794526848339,NA,NA,"1, 6",0,Pass
+fbs_players_merged,hometown_county_population_density,census_geography_2024_clean,numeric,numeric,TRUE,TRUE,1105,7,0,100000,0.12174411275673,21366.4920772501,NA,NA,"1, 9",0,Pass
+fbs_players_merged,receiving_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,13602,86.4,-100,100,0,94,NA,NA,"1, 12",0,Pass
+fbs_players_merged,receptions,player_stats_clean,whole number,numeric,TRUE,TRUE,13602,86.4,0,200,1,84,NA,NA,"1, 11, 33",0,Pass
+fbs_players_merged,receiving_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,13602,86.4,0,200,0,15,NA,NA,"1, 11, 33",0,Pass
+fbs_players_merged,receiving_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,13602,86.4,-500,3000,-15,1349,NA,NA,"1, 11",0,Pass
+fbs_players_merged,receiving_yards_per_reception,player_stats_clean,numeric,numeric,TRUE,TRUE,13602,86.4,-100,100,-15,75,NA,NA,"1, 11",0,Pass
+fbs_players_merged,rushing_carries,player_stats_clean,whole number,numeric,TRUE,TRUE,14138,89.8,0,450,0,230,NA,NA,"1, 11, 32, 36",2,Fail
+fbs_players_merged,rushing_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,14138,89.8,-100,100,0,98,NA,NA,"1, 12",0,Pass
+fbs_players_merged,rushing_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,14138,89.8,0,200,0,20,NA,NA,"1, 11, 32",2,Fail
+fbs_players_merged,rushing_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,14138,89.8,-500,3000,-93,1335,NA,NA,"1, 11, 36",0,Pass
+fbs_players_merged,rushing_yards_per_carry,player_stats_clean,numeric,numeric,TRUE,TRUE,14138,89.8,-100,100,-50,56,NA,NA,"1, 11, 36",0,Pass
+fbs_players_merged,passes_defended,player_stats_clean,whole number,numeric,TRUE,TRUE,9786,62.1,0,200,0,16,NA,NA,"1, 11",0,Pass
+fbs_players_merged,qb_hurries,player_stats_clean,whole number,numeric,TRUE,TRUE,9786,62.1,0,200,0,19,NA,NA,"1, 11",0,Pass
+fbs_players_merged,sacks,player_stats_clean,numeric,numeric,TRUE,TRUE,9786,62.1,0,200,0,14,NA,NA,"1, 11",0,Pass
+fbs_players_merged,tackles_solo,player_stats_clean,whole number,numeric,TRUE,TRUE,9786,62.1,0,200,0,68,NA,NA,"1, 11, 31",0,Pass
+fbs_players_merged,defensive_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,9786,62.1,0,200,0,3,NA,NA,"1, 11",0,Pass
+fbs_players_merged,tackles_for_loss,player_stats_clean,numeric,numeric,TRUE,TRUE,9786,62.1,0,200,0,17.5,NA,NA,"1, 11",0,Pass
+fbs_players_merged,tackles_total,player_stats_clean,whole number,numeric,TRUE,TRUE,9786,62.1,0,200,0,118,NA,NA,"1, 11, 31",0,Pass
+fbs_players_merged,interceptions_yards_per_return,player_stats_clean,numeric,numeric,TRUE,TRUE,15034,95.5,-100,100,-74,98,NA,NA,"1, 11",0,Pass
+fbs_players_merged,interceptions,player_stats_clean,whole number,numeric,TRUE,TRUE,15034,95.5,0,200,1,7,NA,NA,"1, 11",0,Pass
+fbs_players_merged,interceptions_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,15034,95.5,0,200,0,2,NA,NA,"1, 11",0,Pass
+fbs_players_merged,interceptions_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15034,95.5,-500,3000,-74,195,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punt_returns_yards_per_return,player_stats_clean,numeric,numeric,TRUE,TRUE,15417,97.9,-100,100,-20,76,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punt_returns_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15417,97.9,-100,100,0,88,NA,NA,"1, 12",0,Pass
+fbs_players_merged,punt_returns,player_stats_clean,whole number,numeric,TRUE,TRUE,15417,97.9,0,200,0,24,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punt_returns_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,15417,97.9,0,200,0,2,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punt_returns_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15417,97.9,-500,3000,-20,345,NA,NA,"1, 11",0,Pass
+fbs_players_merged,passing_attempts,player_stats_clean,whole number,numeric,TRUE,TRUE,15261,96.9,0,700,1,424,NA,NA,"1, 11, 27, 34",0,Pass
+fbs_players_merged,passing_completions,player_stats_clean,whole number,numeric,TRUE,TRUE,15261,96.9,0,700,0,275,NA,NA,"1, 11, 27, 34",0,Pass
+fbs_players_merged,passing_interceptions,player_stats_clean,whole number,numeric,TRUE,TRUE,15261,96.9,0,200,0,12,NA,NA,"1, 11",0,Pass
+fbs_players_merged,completion_percent,player_stats_clean,numeric,numeric,TRUE,TRUE,15261,96.9,0,100,0,100,NA,NA,"1, 6, 34",0,Pass
+fbs_players_merged,passing_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,15261,96.9,0,200,0,30,NA,NA,"1, 11",0,Pass
+fbs_players_merged,passing_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15261,96.9,-500,6000,-11,3239,NA,NA,"1, 11",0,Pass
+fbs_players_merged,passing_yards_per_attempt,player_stats_clean,numeric,numeric,TRUE,TRUE,15261,96.9,-100,100,-11,75,NA,NA,"1, 11",0,Pass
+fbs_players_merged,field_goals_attempted,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,0,200,0,32,NA,NA,"1, 11, 28",0,Pass
+fbs_players_merged,field_goals_made,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,0,200,0,29,NA,NA,"1, 11, 28, 35",0,Pass
+fbs_players_merged,field_goal_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,-100,75,0,60,NA,NA,"1, 12",0,Pass
+fbs_players_merged,field_goal_percent,player_stats_clean,numeric,numeric,TRUE,TRUE,15525,98.6,0,100,0,100,NA,NA,"1, 6",0,Pass
+fbs_players_merged,kicking_points,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,0,200,0,110,NA,NA,"1, 11, 35",0,Pass
+fbs_players_merged,extra_points_attempted,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,0,200,0,53,NA,NA,"1, 11, 29",0,Pass
+fbs_players_merged,extra_points_made,player_stats_clean,whole number,numeric,TRUE,TRUE,15525,98.6,0,200,0,53,NA,NA,"1, 11, 29, 35",0,Pass
+fbs_players_merged,punts_inside_20,player_stats_clean,whole number,numeric,TRUE,TRUE,15575,98.9,0,200,0,25,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punting_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15575,98.9,-100,100,18,86,NA,NA,"1, 12",0,Pass
+fbs_players_merged,punts,player_stats_clean,whole number,numeric,TRUE,TRUE,15575,98.9,0,200,1,65,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punting_touchbacks,player_stats_clean,whole number,numeric,TRUE,TRUE,15575,98.9,0,200,0,9,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punting_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15575,98.9,-500,6000,18,2884,NA,NA,"1, 11",0,Pass
+fbs_players_merged,punting_yards_per_punt,player_stats_clean,numeric,numeric,TRUE,TRUE,15575,98.9,-100,100,18,51.7,NA,NA,"1, 11",0,Pass
+fbs_players_merged,kick_returns_yards_per_return,player_stats_clean,numeric,numeric,TRUE,TRUE,15209,96.6,-100,100,-4,63,NA,NA,"1, 11",0,Pass
+fbs_players_merged,kick_returns_longest_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15209,96.6,-100,100,0,100,NA,NA,"1, 12",0,Pass
+fbs_players_merged,kick_returns,player_stats_clean,whole number,numeric,TRUE,TRUE,15209,96.6,0,200,0,30,NA,NA,"1, 11",0,Pass
+fbs_players_merged,kick_returns_touchdowns,player_stats_clean,whole number,numeric,TRUE,TRUE,15209,96.6,0,200,0,3,NA,NA,"1, 11",0,Pass
+fbs_players_merged,kick_returns_yards,player_stats_clean,whole number,numeric,TRUE,TRUE,15209,96.6,-500,3000,-13,821,NA,NA,"1, 11",0,Pass
+fbs_players_merged,fumbles,player_stats_clean,whole number,numeric,TRUE,TRUE,14355,91.2,0,200,0,9,NA,NA,"1, 11, 30",0,Pass
+fbs_players_merged,fumbles_lost,player_stats_clean,whole number,numeric,TRUE,TRUE,14355,91.2,0,200,0,5,NA,NA,"1, 11, 30",0,Pass
+fbs_players_merged,fumbles_recovered,player_stats_clean,whole number,numeric,TRUE,TRUE,14355,91.2,0,200,0,4,NA,NA,"1, 11",0,Pass

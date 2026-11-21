@@ -26,7 +26,7 @@ Never commit API keys. Keep them in a .Renviron file in this folder (already in 
 | Member | What I built | Portfolio project entry |
 |---|---|---|
 | [First Last] | [for example: the API pulls and the merge] | [https://USERNAME.github.io/portfolio/#...] |
-| Jacob Farmer | [ ] | https://jacobbfarmer2005.github.io/portfolio/ |
+| Jacob Farmer | Team Roster Scraping, Data Cleaning, Data Merge | https://jacobbfarmer2005.github.io/portfolio/ |
 | Peter Franz | [ ] | https://franzp227.github.io/portfolio/ |
 | Dalton Kane | [ ] | https://djthork.github.io/portfolio/ |
 

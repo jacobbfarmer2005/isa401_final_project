@@ -223,6 +223,9 @@ print(head(hometowns_unmatched, 20))
 Write to `../data/processed/`.
 
 ```{r}
+# previous_school_4 is empty for every 2026 player, so drop it
+fbs_players = dplyr::select(fbs_players, -previous_school_4)
+
 processed_dir = "../data/processed"
 
 write.csv(fbs_players,
