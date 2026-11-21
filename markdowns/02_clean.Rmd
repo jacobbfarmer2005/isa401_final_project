@@ -27,8 +27,6 @@ cfbd_player_stats <- readr::read_csv("../data/raw/cfbd_player_stats.csv",
 
 ### Source 1
 ```{r}
-fbs_rosters_raw = readr::read_csv("../data/raw/fbs_rosters.csv", show_col_types = FALSE)
-
 # ============================================================================
 # Lookup tables
 # ============================================================================
@@ -188,7 +186,7 @@ clean_position = function(x) {
 # ============================================================================
 # Clean
 # ============================================================================
-fbs_rosters_clean = fbs_rosters_raw |>
+fbs_rosters_clean = fbs_rosters |>
   dplyr::mutate(
     # ---- Hometown: fix the few city/state values that were split or glued wrong ----
     hometown_state = stringr::str_remove(hometown_state, "\\s*/.*$"),          # "N.J./Sayreville, N.J." -> "N.J."
@@ -270,10 +268,10 @@ fbs_rosters_clean = fbs_rosters_raw |>
 # Checks: anything that had a value before cleaning but NA after was not recognized
 # ============================================================================
 unmapped = function(before, after) sort(unique(before[!is.na(before) & is.na(after)]))
-message("Unrecognized years:     ", paste(unmapped(fbs_rosters_raw$year, fbs_rosters_clean$year), collapse = " | "))
-message("Unrecognized positions: ", paste(unmapped(fbs_rosters_raw$position, fbs_rosters_clean$position), collapse = " | "))
+message("Unrecognized years:     ", paste(unmapped(fbs_rosters$year, fbs_rosters_clean$year), collapse = " | "))
+message("Unrecognized positions: ", paste(unmapped(fbs_rosters$position, fbs_rosters_clean$position), collapse = " | "))
 message("Unrecognized hometowns: ",
-        paste(unmapped(fbs_rosters_raw$hometown_state,
+        paste(unmapped(fbs_rosters$hometown_state,
                        dplyr::coalesce(as.character(fbs_rosters_clean$hometown_state),
                                        as.character(fbs_rosters_clean$hometown_country))), collapse = " | "))
 ```
