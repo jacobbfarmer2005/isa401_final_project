@@ -20,7 +20,7 @@ if (.Platform$OS.type == "windows") {
   chrome_path = file.path(Sys.getenv("LOCALAPPDATA"), "Google/Chrome/Application/chrome.exe")
   if (file.exists(chrome_path)) Sys.setenv(CHROMOTE_CHROME = chrome_path)
 }
-options(chromote.timeout = 60)
+options(chromote.timeout = 120)
 
 # ---- Helpers ---------------------------------------------------------------
 # Text of the first match inside each node (one value per node, NA if missing)
@@ -651,37 +651,38 @@ print(dplyr::count(fbs_rosters, conference))
 
 What one row is: One U.S. Census geographic area (place or county), containing socioeconomic characteristics, geographic coordinates, and county-matching information where applicable.
 
-```{r census_api}
+```{r}
 # CENSUS DATA SETUP
-library(tidycensus)
-library(tidyverse)
-library(sf)
-library(tigris)
-library(here)
-
 options(tigris_use_cache = TRUE)
-
-# Store the final consolidated CSV in the project's raw data folder
-census_output_dir <- here("data", "raw")
-
-dir.create(
-  census_output_dir,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
 
 # Use 2024 ACS 5-year estimates for consistency
 census_year <- 2024
 
 # Exclude Puerto Rico; retain 50 states and Washington, DC
-census_states <- c(state.abb, "DC")
+census_states <- c(state.abb, "DC", "PR")
 
-# Define variables shared by places and counties
+# Variables requested for BOTH places and counties
 census_variables <- c(
-  median_income = "B19013_001",
-  population = "B01003_001",
-  poverty_total = "B17001_001",
-  poverty_count = "B17001_002"
+  # Population, age, sex
+  population      = "B01003_001",
+  median_age      = "B01002_001",
+  male            = "B01001_002",
+  # Race / ethnicity (Hispanic origin by race; race groups are non-Hispanic)
+  race_total      = "B03002_001",
+  white_nh        = "B03002_003",
+  black_nh        = "B03002_004",
+  asian_nh        = "B03002_006",
+  hispanic        = "B03002_012",
+  # Income and poverty
+  median_income   = "B19013_001",
+  poverty_total   = "B17001_001",
+  poverty_count   = "B17001_002",
+  # Education (population 25+)
+  education_total = "B15003_001",
+  bachelors       = "B15003_022",
+  masters         = "B15003_023",
+  professional    = "B15003_024",
+  doctorate       = "B15003_025"
 )
 
 # Confirm the Census API key is available
@@ -689,257 +690,177 @@ if (Sys.getenv("CENSUS_API_KEY") == "") {
   stop("Census API key not found. Check your .Renviron file.")
 }
 
+# Percentage helper: NA when the denominator is 0 or missing
+safe_pct <- function(num, den) dplyr::if_else(den > 0, num / den * 100, NA_real_)
+
+# Derived demographic and socioeconomic rates (same for places and counties)
+add_census_rates <- function(df) {
+  df |>
+    dplyr::mutate(
+      pct_male            = safe_pct(maleE, populationE),
+      pct_white           = safe_pct(white_nhE, race_totalE),
+      pct_black           = safe_pct(black_nhE, race_totalE),
+      pct_asian           = safe_pct(asian_nhE, race_totalE),
+      pct_hispanic        = safe_pct(hispanicE, race_totalE),
+      pct_other_race      = safe_pct(race_totalE - white_nhE - black_nhE - asian_nhE - hispanicE, race_totalE),
+      poverty_rate        = safe_pct(poverty_countE, poverty_totalE),
+      bachelors_or_higher = safe_pct(bachelorsE + mastersE + professionalE + doctorateE, education_totalE)
+    )
+}
+
+sqm_per_sqmi <- 2589988.110336
+
+
 # NATIONWIDE CENSUS PLACE DATA
 
 # Retrieve ACS data for all 50 states and Washington, DC
-census_places <- purrr::map_dfr(
+census_places <- purrr::map(
   census_states,
   function(st) {
-
     message("Retrieving Census places for: ", st)
-
-    state_data <- get_acs(
+    tidycensus::get_acs(
       geography = "place",
       variables = census_variables,
-      state = st,
-      year = census_year,
-      survey = "acs5",
-      output = "wide"
-    )
-
-    state_data %>%
-      mutate(state_abbr = st)
+      state     = st,
+      year      = census_year,
+      survey    = "acs5",
+      output    = "wide"
+    ) |>
+      dplyr::mutate(state_abbr = st)
   }
-)
+) |>
+  dplyr::bind_rows() |>
+  add_census_rates()
 
-# Calculate poverty rate
-census_places <- census_places %>%
-  mutate(
-    poverty_rate = if_else(
-      poverty_totalE > 0,
-      poverty_countE / poverty_totalE * 100,
-      NA_real_
-    )
-  )
-
-# Check the results
 dim(census_places)
 
-census_places %>%
-  count(state_abbr, sort = TRUE)
 
+# CENSUS PLACE COORDINATES AND LAND AREA
 
+place_boundaries <- tigris::places(year = census_year, cb = TRUE) |>
+  dplyr::filter(GEOID %in% census_places$GEOID)
 
-# CENSUS PLACE GEOGRAPHIC COORDINATES
+place_points <- place_boundaries |>
+  sf::st_transform(6933) |>
+  sf::st_point_on_surface() |>
+  sf::st_transform(4326)
 
-# Retrieve 2024 Census place boundaries
-place_boundaries <- tigris::places(
-  year = census_year,
-  cb = TRUE
-)
+place_coords <- sf::st_coordinates(place_points)
 
-# Keep the same Census places returned by the ACS API
-place_boundaries <- place_boundaries %>%
-  filter(GEOID %in% census_places$GEOID)
-
-# Calculate representative points in a projected coordinate system
-place_points <- place_boundaries %>%
-  st_transform(6933) %>%
-  st_point_on_surface() %>%
-  st_transform(4326)
-
-# Extract longitude and latitude
-place_coords <- st_coordinates(place_points)
-
-place_geography <- place_points %>%
-  st_drop_geometry() %>%
-  transmute(
+place_geography <- place_points |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(
     GEOID,
-    longitude = place_coords[, 1],
-    latitude = place_coords[, 2]
+    longitude      = place_coords[, 1],
+    latitude       = place_coords[, 2],
+    land_area_sqmi = as.numeric(ALAND) / sqm_per_sqmi
   )
 
-# Join coordinates to socioeconomic data
-census_places <- census_places %>%
-  left_join(place_geography, by = "GEOID")
+census_places <- census_places |>
+  dplyr::left_join(place_geography, by = "GEOID") |>
+  dplyr::mutate(population_density = dplyr::if_else(land_area_sqmi > 0, populationE / land_area_sqmi, NA_real_))
 
-# Validate geographic coverage
-census_places %>%
-  summarise(
-    total_places = n(),
+census_places |>
+  dplyr::summarise(
+    total_places        = dplyr::n(),
     missing_coordinates = sum(is.na(longitude) | is.na(latitude)),
-    duplicate_geoids = sum(duplicated(GEOID))
+    missing_density     = sum(is.na(population_density)),
+    duplicate_geoids    = sum(duplicated(GEOID))
   )
-
 
 
 # NATIONWIDE COUNTY CENSUS DATA
 
-# Add education variables to the county Census request
-county_variables <- c(
-  census_variables,
-  education_total = "B15003_001",
-  bachelors = "B15003_022",
-  masters = "B15003_023",
-  professional = "B15003_024",
-  doctorate = "B15003_025"
-)
+# State abbreviation from the first two digits of the county GEOID
+state_lookup <- dplyr::distinct(tidycensus::fips_codes, state_code, state)
 
-# Retrieve 2024 ACS 5-year estimates for U.S. counties
-census_counties <- get_acs(
+census_counties <- tidycensus::get_acs(
   geography = "county",
-  variables = county_variables,
-  year = census_year,
-  survey = "acs5",
-  output = "wide"
-)
-
-# Exclude Puerto Rico and calculate socioeconomic percentages
-census_counties <- census_counties %>%
-  filter(substr(GEOID, 1, 2) != "72") %>%
-  mutate(
-    poverty_rate = if_else(
-      poverty_totalE > 0,
-      poverty_countE / poverty_totalE * 100,
-      NA_real_
-    ),
-    bachelors_or_higher = if_else(
-      education_totalE > 0,
-      (bachelorsE + mastersE + professionalE + doctorateE) /
-        education_totalE * 100,
-      NA_real_
-    )
-  )
-
-# Validate county acquisition
-census_counties %>%
-  summarise(
-    total_counties = n(),
-    duplicate_geoids = sum(duplicated(GEOID)),
-    missing_population = sum(is.na(populationE)),
-    missing_income = sum(is.na(median_incomeE))
-  )
+  variables = census_variables,
+  year      = census_year,
+  survey    = "acs5",
+  output    = "wide"
+) |>
+  dplyr::mutate(state_abbr = state_lookup$state[match(substr(GEOID, 1, 2), state_lookup$state_code)]) |>
+  add_census_rates()
 
 
-# COUNTY GEOGRAPHIC COORDINATES AND POPULATION DENSITY
+# COUNTY COORDINATES AND POPULATION DENSITY
 
-# Retrieve 2024 county boundaries
-county_boundaries <- tigris::counties(
-  year = census_year,
-  cb = TRUE
-)
+county_boundaries <- tigris::counties(year = census_year, cb = TRUE) |>
+  dplyr::filter(GEOID %in% census_counties$GEOID) |>
+  dplyr::mutate(land_area_sqmi = as.numeric(ALAND) / sqm_per_sqmi)
 
-# Keep the same counties included in our ACS dataset
-county_boundaries <- county_boundaries %>%
-  filter(GEOID %in% census_counties$GEOID)
+county_points <- county_boundaries |>
+  sf::st_transform(6933) |>
+  sf::st_point_on_surface() |>
+  sf::st_transform(4326)
 
-# Calculate county land area in square miles
-county_boundaries <- county_boundaries %>%
-  mutate(
-    land_area_sqmi = as.numeric(ALAND) / 2589988.110336
-  )
+county_coords <- sf::st_coordinates(county_points)
 
-# Generate representative county points
-county_points <- county_boundaries %>%
-  st_transform(6933) %>%
-  st_point_on_surface() %>%
-  st_transform(4326)
-
-# Extract longitude and latitude
-county_coords <- st_coordinates(county_points)
-
-county_geography <- county_points %>%
-  st_drop_geometry() %>%
-  transmute(
+county_geography <- county_points |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(
     GEOID,
     longitude = county_coords[, 1],
-    latitude = county_coords[, 2],
+    latitude  = county_coords[, 2],
     land_area_sqmi
   )
 
-# Join geographic characteristics to county Census data
-census_counties <- census_counties %>%
-  left_join(county_geography, by = "GEOID") %>%
-  mutate(
-    population_density = if_else(
-      land_area_sqmi > 0,
-      populationE / land_area_sqmi,
-      NA_real_
-    )
-  )
+census_counties <- census_counties |>
+  dplyr::left_join(county_geography, by = "GEOID") |>
+  dplyr::mutate(population_density = dplyr::if_else(land_area_sqmi > 0, populationE / land_area_sqmi, NA_real_))
 
-# Validate geographic coverage
-census_counties %>%
-  summarise(
-    total_counties = n(),
+census_counties |>
+  dplyr::summarise(
+    total_counties      = dplyr::n(),
+    missing_state       = sum(is.na(state_abbr)),
     missing_coordinates = sum(is.na(longitude) | is.na(latitude)),
-    missing_land_area = sum(is.na(land_area_sqmi)),
-    missing_density = sum(is.na(population_density)),
-    duplicate_geoids = sum(duplicated(GEOID))
+    missing_density     = sum(is.na(population_density)),
+    duplicate_geoids    = sum(duplicated(GEOID))
   )
 
 
 # CITY-TO-COUNTY GEOGRAPHIC MATCHING
 
-# Prepare place and county boundaries in the same projection
-city_boundaries <- place_boundaries %>%
-  select(city_geoid = GEOID, city_name = NAME) %>%
-  st_transform(6933)
+city_boundaries <- place_boundaries |>
+  dplyr::select(city_geoid = GEOID, city_name = NAME) |>
+  sf::st_transform(6933)
 
-county_match_boundaries <- county_boundaries %>%
-  select(county_geoid = GEOID, county_name = NAME) %>%
-  st_transform(6933)
-
-# Generate a representative point inside each Census place
-city_points <- st_point_on_surface(city_boundaries)
+county_match_boundaries <- county_boundaries |>
+  dplyr::select(county_geoid = GEOID, county_name = NAME) |>
+  sf::st_transform(6933)
 
 # Assign each place to the county containing its representative point
-city_county_lookup <- st_join(
-  city_points,
+city_county_lookup <- sf::st_join(
+  sf::st_point_on_surface(city_boundaries),
   county_match_boundaries,
-  join = st_within,
+  join = sf::st_within,
   left = TRUE
-) %>%
-  st_drop_geometry() %>%
-  select(
-    city_geoid,
-    city_name,
-    county_geoid,
-    county_name
-  )
+) |>
+  sf::st_drop_geometry() |>
+  dplyr::select(city_geoid, city_name, county_geoid, county_name)
 
 # Identify places that span multiple counties
-county_overlaps <- st_relate(
-  city_boundaries,
-  county_match_boundaries,
-  pattern = "T********"
-)
+county_overlaps <- sf::st_relate(city_boundaries, county_match_boundaries, pattern = "T********")
 
-county_counts <- tibble(
-  city_geoid = city_boundaries$city_geoid,
-  county_count = lengths(county_overlaps)
-)
-
-# Add county ambiguity indicators
-city_county_lookup <- city_county_lookup %>%
-  left_join(county_counts, by = "city_geoid") %>%
-  mutate(
-    multiple_counties = county_count > 1,
-    county_match_status = if_else(
-      multiple_counties,
-      "Requires county verification",
-      "Single-county match"
-    )
+city_county_lookup <- city_county_lookup |>
+  dplyr::left_join(
+    tibble::tibble(city_geoid = city_boundaries$city_geoid, county_count = lengths(county_overlaps)),
+    by = "city_geoid"
+  ) |>
+  dplyr::mutate(
+    multiple_counties   = county_count > 1,
+    county_match_status = dplyr::if_else(multiple_counties, "Requires county verification", "Single-county match")
   )
 
-# Validate city-to-county matching
-city_county_lookup %>%
-  summarise(
-    total_places = n(),
-    missing_counties = sum(is.na(county_geoid)),
-    duplicate_cities = sum(duplicated(city_geoid)),
+city_county_lookup |>
+  dplyr::summarise(
+    total_places         = dplyr::n(),
+    missing_counties     = sum(is.na(county_geoid)),
+    duplicate_cities     = sum(duplicated(city_geoid)),
     single_county_places = sum(!multiple_counties),
-    multi_county_places = sum(multiple_counties)
+    multi_county_places  = sum(multiple_counties)
   )
 
 
@@ -1018,6 +939,50 @@ write_csv(
   census_geography,
   file.path(census_output_dir, "census_geography_2024.csv")
 )
+
+# Same columns for both levels, so every row carries the full set of demographics
+standardize <- function(df, level) {
+  df |>
+    dplyr::transmute(
+      geography_level = level,
+      geoid = GEOID,
+      name  = NAME,
+      state_abbr,
+      population = populationE,
+      median_age = median_ageE,
+      pct_male, pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race,
+      median_income = median_incomeE,
+      poverty_rate,
+      bachelors_or_higher,
+      longitude, latitude, land_area_sqmi, population_density,
+      county_geoid, county_name, county_count, multiple_counties, county_match_status
+    )
+}
+
+census_places_final <- census_places |>
+  dplyr::left_join(
+    dplyr::select(city_county_lookup, -city_name),
+    by = c("GEOID" = "city_geoid")
+  ) |>
+  standardize("place")
+
+census_counties_final <- census_counties |>
+  dplyr::mutate(
+    county_geoid        = GEOID,
+    county_name         = NAME,
+    county_count        = NA_integer_,
+    multiple_counties   = NA,
+    county_match_status = NA_character_
+  ) |>
+  standardize("county")
+
+census_geography <- dplyr::bind_rows(census_places_final, census_counties_final)
+
+# Validate: share of missing values per column, by geography level
+census_geography |>
+  dplyr::group_by(geography_level) |>
+  dplyr::summarise(dplyr::across(population:population_density, ~ round(mean(is.na(.x)) * 100, 1)),
+                   records = dplyr::n())
 ```
 
 ## Source 3: collegefootballdata.com (API)
@@ -1075,6 +1040,11 @@ raw_dir = "../data/raw"
 write.csv(fbs_rosters,
           file.path(raw_dir, "fbs_rosters.csv"),
           row.names = FALSE)
+
+write.csv(census_geography,
+          file.path(census_output_dir, "census_geography_2024.csv"),
+          row.names = FALSE)
+
 write.csv(cfbd_player_stats,
           file.path(raw_dir, "cfbd_player_stats.csv"),
           row.names = FALSE)
