@@ -51,6 +51,8 @@ LLM extraction from text).
 | [name] | [url] | [ ] | [ ] | [ ] |
 | [name] | [url] | [ ] | [ ] | [ ] |
 
+Add a link to the data dictionary for the final merged dataset here.
+
 ## Pipeline
 
 | Step | File | What it does |
