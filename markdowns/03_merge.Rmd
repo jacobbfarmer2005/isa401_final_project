@@ -26,11 +26,20 @@ Census place ↔ Census county: county_geoid. This attaches demographics for the
 ## Read the cleaned data
 
 ```{r}
-fbs_rosters_clean <- readr::read_csv("../data/processed/fbs_rosters_clean.csv")
+fbs_rosters_clean <- readr::read_csv(
+  "../data/processed/fbs_rosters_clean.csv",
+  col_types = readr::cols(year = "c", hometown_state = "c", .default = readr::col_guess())
+)
 
-census_geography_2024_clean <- readr::read_csv("../data/processed/census_geography_2024_clean.csv")
+census_geography_2024_clean <- readr::read_csv(
+  "../data/processed/census_geography_2024_clean.csv",
+  col_types = readr::cols(geoid = "c", county_geoid = "c", state_abbr = "c", .default = readr::col_guess())
+)
 
-player_stats_clean <- readr::read_csv("../data/processed/player_stats_clean.csv")
+player_stats_clean <- readr::read_csv(
+  "../data/processed/player_stats_clean.csv",
+  col_types = readr::cols(player_id = "c", .default = readr::col_guess())
+)
 ```
 
 ## Prepping keys
