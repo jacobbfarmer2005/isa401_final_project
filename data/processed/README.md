@@ -20,7 +20,6 @@ Cleaned and merged files written by markdowns/02 to 04.
 | previous_school_1 | character | Most recently listed previous college (transfers); NA = none |
 | previous_school_2 | character | Second listed previous college; NA = none |
 | previous_school_3 | character | Third listed previous college; NA = none |
-| previous_school_4 | character | Fourth listed previous college; empty for every player in 2026 |
 | receiving_longest_yards | integer | Longest reception of the season, in yards |
 | receptions | integer | Total receptions (count) |
 | receiving_touchdowns | integer | Receiving touchdowns (count) |
