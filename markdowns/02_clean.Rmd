@@ -14,9 +14,13 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```{r}
 fbs_rosters <- readr::read_csv("../data/raw/fbs_rosters.csv")
 
-census_geography_2024 <- readr::read_csv("../data/raw/census_geography_2024.csv")
+census_geography_2024 <- readr::read_csv("../data/raw/census_geography_2024.csv",
+                                         col_types = readr::cols(geoid = "c", county_geoid = "c", .default = readr::col_guess())
+)
 
-cfbd_player_stats <- readr::read_csv("../data/raw/cfbd_player_stats.csv")
+cfbd_player_stats <- readr::read_csv("../data/raw/cfbd_player_stats.csv",
+                                     col_types = readr::cols(player_id = "c", .default = readr::col_guess())
+)
 ```
 
 ## Clean each source
@@ -501,8 +505,6 @@ message("Percent columns outside 0-100: ",
 ```
 
 ## Save the cleaned data
-
-Write to `../data/processed/`.
 
 ```{r}
 processed_dir = "../data/processed"

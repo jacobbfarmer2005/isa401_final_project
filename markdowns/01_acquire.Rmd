@@ -658,7 +658,7 @@ options(tigris_use_cache = TRUE)
 # Use 2024 ACS 5-year estimates for consistency
 census_year <- 2024
 
-# Exclude Puerto Rico; retain 50 states and Washington, DC
+# Include Puerto Rico, and Washington, DC
 census_states <- c(state.abb, "DC", "PR")
 
 # Variables requested for BOTH places and counties
@@ -863,83 +863,6 @@ city_county_lookup |>
     multi_county_places  = sum(multiple_counties)
   )
 
-
-# CONSOLIDATE CITY AND COUNTY DATA
-
-# Prepare county-level variables for joining
-county_data_for_join <- census_counties %>%
-  transmute(
-    county_geoid = GEOID,
-    county_population = populationE,
-    county_median_income = median_incomeE,
-    county_poverty_rate = poverty_rate,
-    county_bachelors_or_higher = bachelors_or_higher,
-    county_longitude = longitude,
-    county_latitude = latitude,
-    county_land_area_sqmi = land_area_sqmi,
-    county_population_density = population_density
-  )
-
-# Combine place demographics, county assignments, and county demographics
-census_geography <- census_places %>%
-  left_join(
-    city_county_lookup %>%
-      select(
-        city_geoid,
-        county_geoid,
-        county_name,
-        county_count,
-        multiple_counties,
-        county_match_status
-      ),
-    by = c("GEOID" = "city_geoid")
-  ) %>%
-  left_join(
-    county_data_for_join,
-    by = "county_geoid"
-  ) %>%
-  transmute(
-    city_geoid = GEOID,
-    city_name = NAME,
-    state_abbr,
-    city_population = populationE,
-    city_median_income = median_incomeE,
-    city_poverty_rate = poverty_rate,
-    city_longitude = longitude,
-    city_latitude = latitude,
-    county_geoid,
-    county_name,
-    county_population,
-    county_median_income,
-    county_poverty_rate,
-    county_bachelors_or_higher,
-    county_longitude,
-    county_latitude,
-    county_land_area_sqmi,
-    county_population_density,
-    county_count,
-    multiple_counties,
-    county_match_status
-  )
-
-# Validate the final city-centered dataset
-census_geography %>%
-  summarise(
-    total_cities = n(),
-    missing_county_data = sum(is.na(county_population)),
-    missing_city_coordinates = sum(
-      is.na(city_longitude) | is.na(city_latitude)
-    ),
-    duplicate_city_geoids = sum(duplicated(city_geoid)),
-    multi_county_cities = sum(multiple_counties)
-  )
-
-# Save the consolidated CSV
-write_csv(
-  census_geography,
-  file.path(census_output_dir, "census_geography_2024.csv")
-)
-
 # Same columns for both levels, so every row carries the full set of demographics
 standardize <- function(df, level) {
   df |>
@@ -1042,7 +965,7 @@ write.csv(fbs_rosters,
           row.names = FALSE)
 
 write.csv(census_geography,
-          file.path(census_output_dir, "census_geography_2024.csv"),
+          file.path(raw_dir, "census_geography_2024.csv"),
           row.names = FALSE)
 
 write.csv(cfbd_player_stats,
