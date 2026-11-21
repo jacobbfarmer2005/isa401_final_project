@@ -12,14 +12,211 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ## Keys
 
-Which columns link the sources, and how you made them match.
+Rosters ↔ Player stats: join on school + player name. School names were already aligned in cleaning, since CFBD’s names were mapped to the roster’s. Player names will be standardized for a match key: accents removed, lowercase, punctuation and quoted nicknames removed, and suffixes (Jr., Sr., II–V) dropped. Players are matched in two passes:
+
+exact match on school + name key;
+for players still unmatched, school + first initial + last name, which catches nicknames like “Cam Sidney” vs “Cameron Sidney” and “Gabe Russo” vs “Gabriel Russo”.
+
+Only keys that are unique within a school on both sides are used, so no player can be matched twice.
+
+Rosters ↔ Census: hometown_city + hometown_state  connected to Census place name + state_abbr. For the match key, city names are standardized the same way on both sides: accents and apostrophes removed, lowercase, and “St.” / “Ft.” / “Mt.” expanded to “Saint” / “Fort” / “Mount”. NYC boroughs (Bronx, Brooklyn, Queens, Staten Island, Harlem, Manhattan) map to New York city. When two places share a name within a state, such as a “Milford” town and a “Milford” CDP, the more populous one is used.
+
+Census place ↔ Census county: county_geoid. This attaches demographics for the county containing each hometown.
+
+## Read the cleaned data
+
+```{r}
+fbs_rosters_clean <- readr::read_csv("../data/processed/fbs_rosters_clean.csv")
+
+census_geography_2024_clean <- readr::read_csv("../data/processed/census_geography_2024_clean.csv")
+
+player_stats_clean <- readr::read_csv("../data/processed/player_stats_clean.csv")
+```
+
+## Prepping keys
+
+```{r}
+# ---- Key functions ---------------------------------------------------------------
+# Player name -> match key: "T.J. McWilliams Jr." -> "tj mcwilliams"; 'Jayden "Duke" Scott' -> "jayden scott"
+name_key = function(x) {
+  x |>
+    stringi::stri_trans_general("Latin-ASCII") |>
+    stringr::str_remove_all('"[^"]*"') |>              # quoted nicknames
+    stringr::str_to_lower() |>
+    stringr::str_remove_all("[.'`]") |>
+    stringr::str_replace_all("[-,]", " ") |>
+    stringr::str_remove_all("\\b(jr|sr|ii|iii|iv|v)\\b") |>
+    stringr::str_squish()
+}
+
+# Fallback key: first initial + last name ("cameron sidney" -> "c sidney")
+short_key = function(k) {
+  dplyr::if_else(stringr::str_count(k, "\\S+") >= 2,
+                 paste(stringr::str_sub(k, 1, 1), stringr::word(k, -1)), k)
+}
+
+# City -> match key: "St. Louis" -> "saint louis", "Ft. Lauderdale" -> "fort lauderdale", "Kane'ohe" -> "kaneohe"
+city_key = function(x) {
+  x |>
+    stringi::stri_trans_general("Latin-ASCII") |>
+    stringr::str_to_lower() |>
+    stringr::str_remove_all("['`]") |>
+    stringr::str_replace("^st\\.?\\s+", "saint ") |>
+    stringr::str_replace("^ft\\.?\\s+", "fort ") |>
+    stringr::str_replace("^mt\\.?\\s+", "mount ") |>
+    stringr::str_replace_all("[.-]", " ") |>
+    stringr::str_squish()
+}
+
+nyc_boroughs = c("bronx", "the bronx", "brooklyn", "queens", "staten island", "harlem", "manhattan")
+
+# ---- Keyed versions of each source -------------------------------------------------
+roster_keys = fbs_rosters_clean |>
+  dplyr::mutate(
+    roster_row = dplyr::row_number(),
+    name_key   = name_key(name),
+    short_key  = short_key(name_key),
+    city_key   = city_key(hometown_city),
+    city_key   = dplyr::if_else(hometown_state %in% "NY" & city_key %in% nyc_boroughs, "new york", city_key)
+  )
+
+stats_keys = player_stats_clean |>
+  dplyr::mutate(name_key = name_key(name), short_key = short_key(name_key)) |>
+  dplyr::select(player_id, school, name_key, short_key)
+
+# ---- Player crosswalk: roster row <-> CFBD player_id (one-to-one) ------------------
+unique_within_school = function(df, key) {
+  df |> dplyr::add_count(school, {{ key }}, name = "n_key") |> dplyr::filter(n_key == 1) |> dplyr::select(-n_key)
+}
+
+pass1 = dplyr::inner_join(
+  roster_keys |> dplyr::select(roster_row, school, name_key) |> unique_within_school(name_key),
+  stats_keys  |> dplyr::select(player_id, school, name_key)  |> unique_within_school(name_key),
+  by = c("school", "name_key"), relationship = "one-to-one"
+) |>
+  dplyr::mutate(match_method = "Exact name")
+
+pass2 = dplyr::inner_join(
+  roster_keys |> dplyr::filter(!roster_row %in% pass1$roster_row) |>
+    dplyr::select(roster_row, school, short_key) |> unique_within_school(short_key),
+  stats_keys  |> dplyr::filter(!player_id %in% pass1$player_id) |>
+    dplyr::select(player_id, school, short_key) |> unique_within_school(short_key),
+  by = c("school", "short_key"), relationship = "one-to-one"
+) |>
+  dplyr::mutate(match_method = "First initial + last name")
+
+player_crosswalk = dplyr::bind_rows(pass1, pass2) |>
+  dplyr::select(roster_row, player_id, match_method)
+
+# ---- Hometown lookup: one Census place per city + state, with its county ------------
+county_demographics = census_geography_2024_clean |>
+  dplyr::filter(geography_level == "county") |>
+  dplyr::select(county_geoid = geoid, county_population = population, county_median_income = median_income,
+                county_poverty_rate = poverty_rate, county_bachelors_or_higher = bachelors_or_higher,
+                county_population_density = population_density)
+
+hometown_lookup = census_geography_2024_clean |>
+  dplyr::filter(geography_level == "place") |>
+  dplyr::mutate(city_key = city_key(name)) |>
+  dplyr::arrange(dplyr::desc(population)) |>
+  dplyr::distinct(state_abbr, city_key, .keep_all = TRUE) |>        # same-name places: keep the largest
+  dplyr::left_join(county_demographics, by = "county_geoid", relationship = "many-to-one") |>
+  dplyr::select(state_abbr, city_key,
+                geoid, place_type, population, median_age, pct_male,
+                pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race,
+                median_income, median_income_censored, poverty_rate, bachelors_or_higher,
+                longitude, latitude, land_area_sqmi, population_density,
+                county_geoid, county_name, county_population, county_median_income,
+                county_poverty_rate, county_bachelors_or_higher, county_population_density) |>
+  dplyr::rename_with(~ paste0("hometown_", .x), -c(state_abbr, city_key))
+
+message("Crosswalk: ", nrow(pass1), " exact + ", nrow(pass2), " initial/last-name = ",
+        nrow(player_crosswalk), " matched players")
+message("Hometown lookup: ", nrow(hometown_lookup), " unique Census places (city + state)")
+```
 
 ## Join
 
+```{r}
+fbs_players = roster_keys |>
+  # 1. Rosters + player crosswalk (adds player_id)
+  dplyr::left_join(player_crosswalk, by = "roster_row", relationship = "one-to-one") |>
+  # 2. + CFBD season stats (roster already has school, conference, name, position)
+  dplyr::left_join(
+    dplyr::select(player_stats_clean, -school, -conference, -name, -position),
+    by = "player_id", relationship = "one-to-one", na_matches = "never"
+  ) |>
+  # 3. + Census demographics for the player's hometown and hometown county
+  dplyr::left_join(
+    hometown_lookup,
+    by = c("hometown_state" = "state_abbr", "city_key"),
+    relationship = "many-to-one", na_matches = "never"
+  ) |>
+  dplyr::select(-roster_row, -name_key, -short_key, -city_key) |>
+  dplyr::relocate(player_id, match_method, season, .after = position) |>
+  # Restore categorical types lost in the CSV round trip
+  dplyr::mutate(
+    dplyr::across(c(school, conference, position, hometown_state, hometown_country,
+                    match_method, hometown_place_type, hometown_median_income_censored), factor),
+    year   = factor(year, levels = as.character(1:8)),
+    season = as.integer(season)
+  )
+
+dplyr::glimpse(fbs_players)
+```
+
 ## Check the join
 
-Rows before and after each join, and the rows that did not match.
+```{r}
+n_roster = nrow(fbs_rosters_clean)
+
+# ---- Row counts: a left join on a unique key should never add rows ---------------
+row_counts = tibble::tibble(
+  step = c("Rosters (start)", "+ Player stats", "+ Census hometown"),
+  rows = c(n_roster,
+           nrow(dplyr::left_join(roster_keys, player_crosswalk, by = "roster_row")),
+           nrow(fbs_players))
+)
+print(row_counts)
+stopifnot(nrow(fbs_players) == n_roster)
+
+# ---- Match rates ------------------------------------------------------------------
+fbs_players |>
+  dplyr::summarise(
+    roster_players       = dplyr::n(),
+    with_stats           = sum(!is.na(player_id)),
+    pct_with_stats       = round(mean(!is.na(player_id)) * 100, 1),
+    us_hometowns         = sum(hometown_country %in% "United States" & !is.na(hometown_city)),
+    with_census_hometown = sum(!is.na(hometown_geoid)),
+    pct_us_matched       = round(with_census_hometown / us_hometowns * 100, 1)
+  ) |>
+  print()
+
+fbs_players |> dplyr::count(match_method) |> print()
+
+# ---- Unmatched: CFBD players with no roster match -----------------------------------
+stats_unmatched = player_stats_clean |>
+  dplyr::anti_join(player_crosswalk, by = "player_id") |>
+  dplyr::select(school, name, position)
+message(nrow(stats_unmatched), " of ", nrow(player_stats_clean), " CFBD players did not match a roster player")
+print(head(stats_unmatched, 20))
+
+# ---- Unmatched: US hometowns with no Census place ------------------------------------
+hometowns_unmatched = fbs_players |>
+  dplyr::filter(hometown_country %in% "United States", !is.na(hometown_city), is.na(hometown_geoid)) |>
+  dplyr::count(hometown_city, hometown_state, sort = TRUE)
+message(sum(hometowns_unmatched$n), " players' US hometowns did not match a Census place")
+print(head(hometowns_unmatched, 20))
+```
 
 ## Save the final dataset
 
 Write to `../data/processed/`.
+
+```{r}
+processed_dir = "../data/processed"
+
+write.csv(fbs_players,
+          file.path(processed_dir, "fbs_players_merged.csv"),
+          row.names = FALSE)
+```
