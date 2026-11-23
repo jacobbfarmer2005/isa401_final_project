@@ -14,11 +14,11 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 **Data Type**
 
-1. Each column has its expected R type: factor for categories (`school`, `conference`, `year`, `position`, `hometown_state`, `hometown_country`, `match_method`, `hometown_place_type`, `hometown_median_income_censored`); character for text and IDs (`name`, `player_id`, `hometown_city`, `previous_school_1`–`4`, `hometown_geoid`, `hometown_county_geoid`, `hometown_county_name`); whole numbers for counts, yards and populations; numeric for measurements, rates and percentages.
+1. Each column has its expected R type: factor for categories (`school`, `conference`, `year`, `position`, `hometown_state`, `hometown_country`, `match_method`, `hometown_match_level`, `hometown_place_type`, `hometown_median_income_censored`); character for text and IDs (`name`, `player_id`, `hometown_city`, `previous_school_1`–`N` (as many as the data contains), `hometown_geoid`, `hometown_county_geoid`, `hometown_county_name`); whole numbers for counts, yards and populations; numeric for measurements, rates and percentages.
 
 **Presence**
 
-2. The required columns `school`, `conference`, `name` and `position` contain no missing values. All other columns may be missing: stats are NA for players with no record in that category, and Census columns are NA for hometowns that did not match a Census place.
+2. The required columns `school`, `conference`, `name` and `position` contain no missing values. All other columns may be missing: stats are NA for players with no record in that category, and Census columns are NA for hometowns that did not match a Census geography.
 
 **Range**
 
@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 6. All percentage columns (race/ethnicity shares, `hometown_pct_male`, poverty rate, bachelor's-or-higher share, `completion_percent`, `field_goal_percent`) are between 0 and 100.
 7. `hometown_median_income` and `hometown_county_median_income` are between $2,500 and $250,000, the ACS reporting limits.
 8. `hometown_median_age` is between 10 and 100 years.
-9. Populations, land areas and population densities are not negative and are below realistic maximums: place population at most 10 million, county population at most 11 million, land area at most 5,000 square miles, density at most 100,000 people per square mile.
+9. Populations, land areas and population densities are not negative and are below realistic maximums: place population at most 10 million, county population at most 11 million, land area at most 150,000 square miles (about the size of the largest US county-equivalent, since county-level matches report the whole county's area), density at most 100,000 people per square mile.
 10. `hometown_latitude` is between 17 and 72 and `hometown_longitude` is between −180 and −64, which covers the US and Puerto Rico.
 11. Stat counts are not negative and stay below realistic season maximums. Yardage may be negative, down to −500 yards, because lost yardage is real.
 12. Longest plays are at most 100 yards, and longest field goals are at most 75 yards.
@@ -40,17 +40,17 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 15. Every position listed in `position` is a recognized spelled-out position name.
 16. For US players, `hometown_state` is a valid USPS code (50 states, DC, PR, AS, GU, MP, VI).
 17. `hometown_country` is a country name recognized under ISO 3166 (England, Scotland, Wales and Northern Ireland are accepted as UK constituent countries).
-18. `hometown_geoid` is a 7-digit Census place FIPS code whose first two digits match the hometown state's FIPS code.
-19. `hometown_county_geoid` is a 5-digit county FIPS code in the same state as the place.
+18. `hometown_geoid` has the length its `hometown_match_level` requires (7 digits for a place, 10 for a county subdivision, 5 for a county), its first two digits match the hometown state's FIPS code, and `hometown_match_level` is filled in exactly when `hometown_geoid` is.
+19. `hometown_county_geoid` is a 5-digit county FIPS code in the same state as the hometown geography.
 20. `player_id` contains digits only.
-21. `match_method` is "Exact name" or "First initial + last name".
-22. `hometown_place_type` is a valid Census place type (city, town, village, borough, CDP, etc).
+21. `match_method` is "Exact name", "First initial + last name" or "Similar name".
+22. `hometown_place_type` is a valid Census place or county subdivision type (city, town, village, borough, CDP, township, charter township, etc.). It is empty for county-level matches.
 23. `hometown_median_income_censored` is "Bottom-coded (under $2,500)" or "Top-coded (over $250,000)".
 
 **Foreign key**
 
 24. Every `player_id` exists in `player_stats_clean`.
-25. Every `hometown_geoid` exists as a place in `census_geography_2024_clean`.
+25. Every `hometown_geoid` exists in `census_geography_2024_clean` at the geography level named by `hometown_match_level`.
 26. Every `hometown_county_geoid` exists as a county in `census_geography_2024_clean`.
 
 **Consistency**
@@ -85,14 +85,14 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 48. No API key is hard-coded in any `.Rmd` file.
 49. `.Renviron` is listed in `.gitignore`, so the keys are never committed.
 50. Tidy: each observation (one player) forms one row, with no duplicate rows.
-51. Tidy: each variable forms one column. Exceptions are flagged: multiple positions stored in one cell, and the `previous_school_1`–`4` repeating group.
+51. Tidy: each variable forms one column. Exceptions are flagged: multiple positions stored in one cell, and the `previous_school_1`–`N` repeating group.
 52. Tidy: each cell holds a single value.
 53. Technically correct: every column name is snake_case and describes its contents, including units where relevant (for example `height_in`, `weight_lbs`).
 54. Technically correct: every column's data type matches its contents (rule 1).
-55. Consistent with the research question: the dataset includes every variable the question needs, namely players, hometown population, median income, population density, education, poverty rate and university proximity.
+55. Consistent with the research question: the dataset includes every variable the question needs, namely players, hometown population, median income, population density, education, and poverty rate.
 56. Per-capita rates are only computed for hometowns with a population above 0.
 57. Per-capita analysis includes communities that produced zero players, so rates are not biased upward.
-58. Failed joins are identified: US hometowns (city + state) that did not match a Census place.
+58. Failed joins are identified: US hometowns (city + state) that did not match a Census place, county subdivision or county.
 59. Failed joins are identified: CFBD players who did not match a roster player.
 
 **Probabilistic**
@@ -101,25 +101,27 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 61. A player's height is flagged if it is more than 3.5 robust standard deviations (median absolute deviation) from the median for his position.
 62. A school's roster size is flagged if it falls outside the IQR fences (Q1 − 1.5 × IQR, Q3 + 1.5 × IQR).
 63. A school is flagged if its missing rate for `year`, `height_in`, `weight_lbs` or `hometown_city` is far above the overall rate (binomial z > 3).
-64. Players whose hometowns matched a Census place and players whose hometowns did not should have similar height and weight distributions. A significant difference would mean the failed joins bias the sample.
+64. Players whose hometowns matched a Census geography and players whose hometowns did not should have similar height and weight distributions. A significant difference would mean the failed joins bias the sample.
 
 ## Validation table
 
-**Loading Data**
+### Loading the data
 
-```{r}
+```{r load_validation}
 processed_dir = "../data/processed"
 
-# Merged dataset: IDs and codes as text, then restore the factor types lost in the CSV
+# Merged dataset: IDs and codes as text, then restore the factor types lost in the CSV.
+# guess_max = Inf guesses each type from every row, so sparse columns such as
+# previous_school_4 are read as text rather than mistaken for empty logical columns.
 fbs_players = readr::read_csv(
   file.path(processed_dir, "fbs_players_merged.csv"),
   col_types = readr::cols(player_id = "c", hometown_geoid = "c", hometown_county_geoid = "c",
                           year = "c", hometown_state = "c", .default = readr::col_guess()),
-  show_col_types = FALSE
+  guess_max = Inf, show_col_types = FALSE
 ) |>
   dplyr::mutate(
-    dplyr::across(c(school, conference, position, hometown_state, hometown_country,
-                    match_method, hometown_place_type, hometown_median_income_censored), factor),
+    dplyr::across(c(school, conference, position, hometown_state, hometown_country, match_method,
+                    hometown_match_level, hometown_place_type, hometown_median_income_censored), factor),
     year = factor(year, levels = as.character(1:8))
   )
 
@@ -130,91 +132,89 @@ player_stats_clean = readr::read_csv(
 )
 census_clean = readr::read_csv(
   file.path(processed_dir, "census_geography_2024_clean.csv"),
-  col_types = readr::cols(geoid = "c", county_geoid = "c", state_abbr = "c", .default = readr::col_guess()),
-  show_col_types = FALSE
+  col_types = readr::cols(geography_level = "c", geoid = "c", name = "c", place_type = "c",
+                          is_statistical_area = "l", state_abbr = "c", median_income_censored = "c",
+                          county_geoid = "c", county_name = "c", county_match_status = "c",
+                          county_count = "i", multiple_counties = "l", .default = "d")
 )
 
 message(nrow(fbs_players), " rows x ", ncol(fbs_players), " columns")
 ```
 
-**Creating the Validation Table**
+### Rules, reference lists and column constraints
 
-```{r}
-# ============================================================================
-# 1. Rule catalog: the 64 rules listed above
-# ============================================================================
+```{r validation_setup}
+# ---- Rule catalog: every rule above, with the kind of problem it catches ----
 rule_catalog = tibble::tribble(
-  ~rule, ~category,       ~description,
-  1,  "Data type",        "Each column has its expected R type",
-  2,  "Presence",         "school, conference, name and position are never missing",
-  3,  "Range",            "height_in is between 60 and 95",
-  4,  "Range",            "weight_lbs is between 100 and 5000",
-  5,  "Range",            "season is 2026",
-  6,  "Range",            "Percentage columns are between 0 and 100",
-  7,  "Range",            "Median incomes are between $2,500 and $250,000",
-  8,  "Range",            "hometown_median_age is between 10 and 100",
-  9,  "Range",            "Populations, land areas and densities are non-negative and below realistic maximums",
-  10, "Range",            "Latitude 17 to 72 and longitude -180 to -64",
-  11, "Range",            "Stat counts non-negative and below season maximums; yardage at least -500",
-  12, "Range",            "Longest plays at most 100 yards; longest field goal at most 75",
-  13, "Code",             "conference is one of the 11 FBS conferences",
-  14, "Code",             "year is 1-8",
-  15, "Code",             "Every listed position is a recognized spelled-out position",
-  16, "Code",             "US hometown_state is a valid USPS code",
-  17, "Code",             "hometown_country is an ISO 3166 country (or UK constituent country)",
-  18, "Code",             "hometown_geoid is 7 digits and starts with the hometown state's FIPS code",
-  19, "Code",             "hometown_county_geoid is 5 digits and in the same state as the place",
-  20, "Code",             "player_id contains digits only",
-  21, "Code",             "match_method is a defined method",
-  22, "Code",             "hometown_place_type is a valid Census place type",
-  23, "Code",             "hometown_median_income_censored is a defined level",
-  24, "Foreign key",      "player_id exists in player_stats_clean",
-  25, "Foreign key",      "hometown_geoid exists as a Census place",
-  26, "Foreign key",      "hometown_county_geoid exists as a Census county",
-  27, "Consistency",      "Completions <= attempts",
-  28, "Consistency",      "Field goals made <= attempted",
-  29, "Consistency",      "Extra points made <= attempted",
-  30, "Consistency",      "Fumbles lost <= fumbles",
-  31, "Consistency",      "Solo tackles <= total tackles",
-  32, "Consistency",      "Rushing touchdowns <= carries (laterals/fumble recoveries may break this)",
-  33, "Consistency",      "Receiving touchdowns <= receptions",
-  34, "Consistency",      "Completion % = completions / attempts x 100 (within 1 point)",
-  35, "Consistency",      "Kicking points = 3 x field goals made + extra points made",
-  36, "Consistency",      "Yards per carry = yards / carries (within 0.15)",
-  37, "Consistency",      "match_method is filled exactly when player_id is",
-  38, "Consistency",      "Each school belongs to exactly one conference",
-  39, "Consistency",      "Race/ethnicity shares sum to 100% (within 0.01)",
-  40, "Consistency",      "Censoring flag is set exactly when income is at $2,500 or $250,000",
-  41, "Uniqueness",       "Each player_id appears at most once",
-  42, "Uniqueness",       "No player appears twice (school + name + position + hometown city)",
-  43, "Uniqueness",       "All 139 FBS schools are present",
-  44, "Uniqueness",       "All 11 FBS conferences are present",
-  45, "Uniqueness",       "Only players: no coaches/staff, Team IMPACT members, memorial entries or honorary captains",
-  46, "Business rule",    "API keys are stored in .Renviron in the project root",
-  47, "Business rule",    ".Renviron defines CFBD_API_KEY and CENSUS_API_KEY",
-  48, "Business rule",    "No API key is hard-coded in any .Rmd file",
-  49, "Business rule",    ".Renviron is listed in .gitignore",
-  50, "Business rule",    "Tidy: one row per player, no duplicate rows",
-  51, "Business rule",    "Tidy: each variable forms one column (exceptions flagged)",
-  52, "Business rule",    "Tidy: each cell holds a single value",
-  53, "Business rule",    "Technically correct: snake_case, descriptive column names",
-  54, "Business rule",    "Technically correct: every column has its expected type (rule 1)",
-  55, "Business rule",    "Dataset holds every variable the research question needs",
-  56, "Business rule",    "Per-capita rates only for hometowns with population above 0",
-  57, "Business rule",    "Per-capita analysis includes communities with zero players",
-  58, "Business rule",    "Failed join: US hometown did not match a Census place",
-  59, "Business rule",    "Failed join: CFBD player did not match a roster player",
-  60, "Probabilistic",    "Weight more than 3.5 robust SDs from the position median",
-  61, "Probabilistic",    "Height more than 3.5 robust SDs from the position median",
-  62, "Probabilistic",    "School roster size outside the IQR fences",
-  63, "Probabilistic",    "School missing rate far above the overall rate (binomial z > 3)",
-  64, "Probabilistic",    "Census-matched and unmatched players have similar height/weight (KS p > 0.01)"
+  ~rule, ~category,       ~check_type,                    ~description,
+  1,  "Data type",        "Wrong data type",              "Each column has its expected R type",
+  2,  "Presence",         "Missing required value",       "school, conference, name and position are never missing",
+  3,  "Range",            "Impossible value",             "height_in is between 60 and 95",
+  4,  "Range",            "Impossible value",             "weight_lbs is between 100 and 5000",
+  5,  "Range",            "Impossible value",             "season is 2026",
+  6,  "Range",            "Impossible value",             "Percentage columns are between 0 and 100",
+  7,  "Range",            "Impossible value",             "Median incomes are between $2,500 and $250,000",
+  8,  "Range",            "Impossible value",             "hometown_median_age is between 10 and 100",
+  9,  "Range",            "Impossible value",             "Populations, land areas and densities are non-negative and below realistic maximums",
+  10, "Range",            "Impossible value",             "Latitude 17 to 72 and longitude -180 to -64",
+  11, "Range",            "Impossible value",             "Stat counts non-negative and below season maximums; yardage at least -500",
+  12, "Range",            "Impossible value",             "Longest plays at most 100 yards; longest field goal at most 75",
+  13, "Code",             "Invalid category",             "conference is one of the 11 FBS conferences",
+  14, "Code",             "Invalid category",             "year is 1-8",
+  15, "Code",             "Invalid category",             "Every listed position is a recognized spelled-out position",
+  16, "Code",             "Invalid category",             "US hometown_state is a valid USPS code",
+  17, "Code",             "Invalid category",             "hometown_country is an ISO 3166 country (or UK constituent country)",
+  18, "Code",             "Invalid category",             "hometown_geoid length matches its match level (7/10/5) and starts with the state FIPS code",
+  19, "Code",             "Invalid category",             "hometown_county_geoid is 5 digits and in the same state as the hometown",
+  20, "Code",             "Invalid category",             "player_id contains digits only",
+  21, "Code",             "Invalid category",             "match_method is a defined method",
+  22, "Code",             "Invalid category",             "hometown_place_type is a valid Census place or county subdivision type",
+  23, "Code",             "Invalid category",             "hometown_median_income_censored is a defined level",
+  24, "Foreign key",      "Failed join",                  "player_id exists in player_stats_clean",
+  25, "Foreign key",      "Failed join",                  "hometown_geoid exists at its match level in the Census data",
+  26, "Foreign key",      "Failed join",                  "hometown_county_geoid exists as a Census county",
+  27, "Consistency",      "Inconsistent values",          "Completions <= attempts",
+  28, "Consistency",      "Inconsistent values",          "Field goals made <= attempted",
+  29, "Consistency",      "Inconsistent values",          "Extra points made <= attempted",
+  30, "Consistency",      "Inconsistent values",          "Fumbles lost <= fumbles",
+  31, "Consistency",      "Inconsistent values",          "Solo tackles <= total tackles",
+  32, "Consistency",      "Inconsistent values",          "Rushing touchdowns <= carries (laterals/fumble recoveries may break this)",
+  33, "Consistency",      "Inconsistent values",          "Receiving touchdowns <= receptions",
+  34, "Consistency",      "Inconsistent values",          "Completion % = completions / attempts x 100 (within 1 point)",
+  35, "Consistency",      "Inconsistent values",          "Kicking points = 3 x field goals made + extra points made",
+  36, "Consistency",      "Inconsistent values",          "Yards per carry = yards / carries (within 0.15)",
+  37, "Consistency",      "Inconsistent values",          "match_method is filled exactly when player_id is",
+  38, "Consistency",      "Inconsistent values",          "Each school belongs to exactly one conference",
+  39, "Consistency",      "Inconsistent values",          "Race/ethnicity shares sum to 100% (within 0.01)",
+  40, "Consistency",      "Inconsistent values",          "Censoring flag is set exactly when income is at $2,500 or $250,000",
+  41, "Uniqueness",       "Duplicate entry",              "Each player_id appears at most once",
+  42, "Uniqueness",       "Duplicate entry",              "No player appears twice (school + name + position + hometown city)",
+  43, "Uniqueness",       "Missing group",                "All 139 FBS schools are present",
+  44, "Uniqueness",       "Missing group",                "All 11 FBS conferences are present",
+  45, "Uniqueness",       "Non-player entry",             "Only players: no coaches/staff, Team IMPACT members, memorial entries or honorary captains",
+  46, "Business rule",    "Business rule",                "API keys are stored in .Renviron in the project root",
+  47, "Business rule",    "Business rule",                ".Renviron defines CFBD_API_KEY and CENSUS_API_KEY",
+  48, "Business rule",    "Business rule",                "No API key is hard-coded in any .Rmd file",
+  49, "Business rule",    "Business rule",                ".Renviron is listed in .gitignore",
+  50, "Business rule",    "Duplicate entry",              "Tidy: one row per player, no duplicate rows",
+  51, "Business rule",    "Business rule",                "Tidy: each variable forms one column (exceptions flagged)",
+  52, "Business rule",    "Multiple values in one cell",  "Tidy: each cell holds a single value",
+  53, "Business rule",    "Business rule",                "Technically correct: snake_case, descriptive column names",
+  54, "Business rule",    "Wrong data type",              "Technically correct: every column has its expected type (rule 1)",
+  55, "Business rule",    "Business rule",                "Dataset holds every variable the research question needs",
+  56, "Business rule",    "Zero population",              "Per-capita rates only for hometowns with population above 0",
+  57, "Business rule",    "Business rule",                "Per-capita analysis includes communities with zero players",
+  58, "Business rule",    "Failed join",                  "Failed join: US hometown did not match a Census geography",
+  59, "Business rule",    "Failed join",                  "Failed join: CFBD player did not match a roster player",
+  60, "Probabilistic",    "Statistical outlier",          "Weight more than 3.5 robust SDs from the position median",
+  61, "Probabilistic",    "Statistical outlier",          "Height more than 3.5 robust SDs from the position median",
+  62, "Probabilistic",    "Statistical outlier",          "School roster size outside the IQR fences",
+  63, "Probabilistic",    "Statistical outlier",          "School missing rate far above the overall rate (binomial z > 3)",
+  64, "Probabilistic",    "Statistical outlier",          "Census-matched and unmatched players have similar height/weight (KS p > 0.01)"
 ) |>
   dplyr::mutate(rule = as.integer(rule))
 
-# ============================================================================
-# 2. Reference code lists
-# ============================================================================
+# ---- Reference code lists ----
 fbs_conferences = c("ACC", "American", "Big 12", "Big Ten", "Conference USA", "FBS Independent",
                     "MAC", "Mountain West", "Pac-12", "SEC", "Sun Belt")
 valid_positions = c("Quarterback", "Running Back", "Fullback", "Slotback", "Athlete", "Wide Receiver",
@@ -227,277 +227,244 @@ usps_codes         = c(state.abb, "DC", "PR", "AS", "GU", "MP", "VI")
 census_place_types = c("city and borough", "unified government", "consolidated government",
                        "metropolitan government", "metro government", "metro township", "urban county",
                        "zona urbana", "comunidad", "municipality", "corporation",
-                       "borough", "village", "town", "city", "CDP")
-match_methods      = c("Exact name", "First initial + last name")
+                       "borough", "village", "town", "city", "CDP",
+                       # county subdivision types (towns and townships)
+                       "charter township", "township", "barrio-pueblo", "barrio", "plantation",
+                       "precinct", "district", "grant", "gore", "location", "purchase")
+match_methods      = c("Exact name", "First initial + last name", "Similar name")
+match_levels       = c("Place", "County subdivision", "County")
+geoid_digits       = c("Place" = 7L, "County subdivision" = 10L, "County" = 5L)
 censored_levels    = c("Bottom-coded (under $2,500)", "Top-coded (over $250,000)")
 state_fips         = dplyr::distinct(tidycensus::fips_codes, state, state_code)
 uk_constituents    = c("England", "Scotland", "Wales", "Northern Ireland")
 
-valid_country = function(x) {
-  x = as.character(x)
-  is.na(x) | x %in% uk_constituents |
-    !is.na(suppressWarnings(countrycode::countryname(x, destination = "iso3c", warn = FALSE)))
-}
-
-# ============================================================================
-# 3. Column specification: the backbone of the validation table
-# ============================================================================
+# ---- Column constraints: type, nullability, range, allowed values and foreign keys ----
 id_spec = tibble::tribble(
-  ~column,                               ~source_table,                 ~expected_type, ~nullable, ~min,  ~max,   ~range_rule, ~allowed_values,                            ~foreign_key,
-  "school",                              "fbs_rosters_clean",           "factor",       FALSE,     NA,    NA,     NA,          "139 FBS schools",                          NA,
-  "conference",                          "fbs_rosters_clean",           "factor",       FALSE,     NA,    NA,     NA,          "11 FBS conferences",                       NA,
-  "name",                                "fbs_rosters_clean",           "character",    FALSE,     NA,    NA,     NA,          NA,                                         NA,
-  "year",                                "fbs_rosters_clean",           "factor",       TRUE,      NA,    NA,     NA,          "1-8",                                      NA,
-  "position",                            "fbs_rosters_clean",           "factor",       FALSE,     NA,    NA,     NA,          "Spelled-out positions",                    NA,
-  "player_id",                           "player_stats_clean",          "character",    TRUE,      NA,    NA,     NA,          "Digits only",                              "player_stats_clean.player_id",
-  "match_method",                        "Merge (derived)",             "factor",       TRUE,      NA,    NA,     NA,          "Exact name; First initial + last name",    NA,
-  "season",                              "player_stats_clean",          "whole number", TRUE,      2026,  2026,   5,           NA,                                         NA,
-  "height_in",                           "fbs_rosters_clean",           "numeric",      TRUE,      60,    95,     3,           NA,                                         NA,
-  "weight_lbs",                          "fbs_rosters_clean",           "whole number", TRUE,      100,   5000,   4,           NA,                                         NA,
-  "hometown_city",                       "fbs_rosters_clean",           "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "hometown_state",                      "fbs_rosters_clean",           "factor",       TRUE,      NA,    NA,     NA,          "USPS code (US) or province name",          NA,
-  "hometown_country",                    "fbs_rosters_clean",           "factor",       TRUE,      NA,    NA,     NA,          "ISO 3166 country name",                    NA,
-  "previous_school_1",                   "fbs_rosters_clean",           "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "previous_school_2",                   "fbs_rosters_clean",           "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "previous_school_3",                   "fbs_rosters_clean",           "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "previous_school_4",                   "fbs_rosters_clean",           "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "hometown_geoid",                      "census_geography_2024_clean", "character",    TRUE,      NA,    NA,     NA,          "7-digit place FIPS",                       "census_geography_2024_clean.geoid (place)",
-  "hometown_place_type",                 "census_geography_2024_clean", "factor",       TRUE,      NA,    NA,     NA,          "Census place types",                       NA,
-  "hometown_population",                 "census_geography_2024_clean", "whole number", TRUE,      0,     1e7,    9,           NA,                                         NA,
-  "hometown_median_age",                 "census_geography_2024_clean", "numeric",      TRUE,      10,    100,    8,           NA,                                         NA,
-  "hometown_pct_male",                   "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_pct_white",                  "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_pct_black",                  "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_pct_asian",                  "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_pct_hispanic",               "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_pct_other_race",             "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_median_income",              "census_geography_2024_clean", "numeric",      TRUE,      2500,  250000, 7,           NA,                                         NA,
-  "hometown_median_income_censored",     "census_geography_2024_clean", "factor",       TRUE,      NA,    NA,     NA,          "Bottom-coded; Top-coded",                  NA,
-  "hometown_poverty_rate",               "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_bachelors_or_higher",        "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_longitude",                  "census_geography_2024_clean", "numeric",      TRUE,      -180,  -64,    10,          NA,                                         NA,
-  "hometown_latitude",                   "census_geography_2024_clean", "numeric",      TRUE,      17,    72,     10,          NA,                                         NA,
-  "hometown_land_area_sqmi",             "census_geography_2024_clean", "numeric",      TRUE,      0,     5000,   9,           NA,                                         NA,
-  "hometown_population_density",         "census_geography_2024_clean", "numeric",      TRUE,      0,     1e5,    9,           NA,                                         NA,
-  "hometown_county_geoid",               "census_geography_2024_clean", "character",    TRUE,      NA,    NA,     NA,          "5-digit county FIPS",                      "census_geography_2024_clean.geoid (county)",
-  "hometown_county_name",                "census_geography_2024_clean", "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
-  "hometown_county_population",          "census_geography_2024_clean", "whole number", TRUE,      0,     1.1e7,  9,           NA,                                         NA,
-  "hometown_county_median_income",       "census_geography_2024_clean", "numeric",      TRUE,      2500,  250000, 7,           NA,                                         NA,
-  "hometown_county_poverty_rate",        "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_county_bachelors_or_higher", "census_geography_2024_clean", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
-  "hometown_county_population_density",  "census_geography_2024_clean", "numeric",      TRUE,      0,     1e5,    9,           NA,                                         NA
+  ~column,                               ~expected_type, ~nullable, ~min,  ~max,   ~range_rule, ~allowed_values,                            ~foreign_key,
+  "school",                              "factor",       FALSE,     NA,    NA,     NA,          "139 FBS schools",                          NA,
+  "conference",                          "factor",       FALSE,     NA,    NA,     NA,          "11 FBS conferences",                       NA,
+  "name",                                "character",    FALSE,     NA,    NA,     NA,          NA,                                         NA,
+  "year",                                "factor",       TRUE,      NA,    NA,     NA,          "1-8",                                      NA,
+  "position",                            "factor",       FALSE,     NA,    NA,     NA,          "Spelled-out positions",                    NA,
+  "player_id",                           "character",    TRUE,      NA,    NA,     NA,          "Digits only",                              "player_stats_clean.player_id",
+  "match_method",                        "factor",       TRUE,      NA,    NA,     NA,          "Exact name; First initial + last name; Similar name", NA,
+  "season",                              "whole number", TRUE,      2026,  2026,   5,           NA,                                         NA,
+  "height_in",                           "numeric",      TRUE,      60,    95,     3,           NA,                                         NA,
+  "weight_lbs",                          "whole number", TRUE,      100,   5000,   4,           NA,                                         NA,
+  "hometown_city",                       "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
+  "hometown_state",                      "factor",       TRUE,      NA,    NA,     NA,          "USPS code (US) or province name",          NA,
+  "hometown_country",                    "factor",       TRUE,      NA,    NA,     NA,          "ISO 3166 country name",                    NA,
+  "hometown_geoid",                      "character",    TRUE,      NA,    NA,     NA,          "7-digit place, 10-digit county subdivision or 5-digit county FIPS", "census_geography_2024_clean.geoid (at hometown_match_level)",
+  "hometown_match_level",                "factor",       TRUE,      NA,    NA,     NA,          "Place; County subdivision; County",        NA,
+  "hometown_place_type",                 "factor",       TRUE,      NA,    NA,     NA,          "Census place or county subdivision types", NA,
+  "hometown_population",                 "whole number", TRUE,      0,     1e7,    9,           NA,                                         NA,
+  "hometown_median_age",                 "numeric",      TRUE,      10,    100,    8,           NA,                                         NA,
+  "hometown_pct_male",                   "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_pct_white",                  "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_pct_black",                  "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_pct_asian",                  "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_pct_hispanic",               "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_pct_other_race",             "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_median_income",              "numeric",      TRUE,      2500,  250000, 7,           NA,                                         NA,
+  "hometown_median_income_censored",     "factor",       TRUE,      NA,    NA,     NA,          "Bottom-coded; Top-coded",                  NA,
+  "hometown_poverty_rate",               "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_bachelors_or_higher",        "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_longitude",                  "numeric",      TRUE,      -180,  -64,    10,          NA,                                         NA,
+  "hometown_latitude",                   "numeric",      TRUE,      17,    72,     10,          NA,                                         NA,
+  "hometown_land_area_sqmi",             "numeric",      TRUE,      0,     1.5e5,  9,           NA,                                         NA,
+  "hometown_population_density",         "numeric",      TRUE,      0,     1e5,    9,           NA,                                         NA,
+  "hometown_county_geoid",               "character",    TRUE,      NA,    NA,     NA,          "5-digit county FIPS",                      "census_geography_2024_clean.geoid (county)",
+  "hometown_county_name",                "character",    TRUE,      NA,    NA,     NA,          NA,                                         NA,
+  "hometown_county_population",          "whole number", TRUE,      0,     1.1e7,  9,           NA,                                         NA,
+  "hometown_county_median_income",       "numeric",      TRUE,      2500,  250000, 7,           NA,                                         NA,
+  "hometown_county_poverty_rate",        "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_county_bachelors_or_higher", "numeric",      TRUE,      0,     100,    6,           NA,                                         NA,
+  "hometown_county_population_density",  "numeric",      TRUE,      0,     1e5,    9,           NA,                                         NA
 )
 
-# Stat columns: type and limits follow from the unit in the name
-stat_cols = setdiff(names(player_stats_clean), c("season", "player_id", "school", "conference", "name", "position"))
-
-stat_spec = tibble::tibble(column = stat_cols) |>
+# Stat columns: type and limits follow from the unit in the column name
+stat_spec = tibble::tibble(
+  column = setdiff(names(player_stats_clean), c("season", "player_id", "school", "conference", "name", "position"))
+) |>
   dplyr::mutate(
-    source_table  = "player_stats_clean",
-    expected_type = dplyr::if_else(stringr::str_detect(column, "_per_|_percent$|^sacks$|^tackles_for_loss$"),
-                                   "numeric", "whole number"),
-    nullable      = TRUE,                                         # NA = no record in that category
+    expected_type  = dplyr::if_else(stringr::str_detect(column, "_per_|_percent$|^sacks$|^tackles_for_loss$"),
+                                    "numeric", "whole number"),
+    nullable       = TRUE,                                        # NA = no record in that category
     min = dplyr::case_when(
-      stringr::str_detect(column, "_percent$")                    ~ 0,
-      stringr::str_detect(column, "_per_|longest_yards$")         ~ -100,
-      stringr::str_detect(column, "_yards$")                      ~ -500,
-      TRUE                                                        ~ 0
+      stringr::str_detect(column, "_percent$")                   ~ 0,
+      stringr::str_detect(column, "_per_|longest_yards$")        ~ -100,
+      stringr::str_detect(column, "_yards$")                     ~ -500,
+      TRUE                                                       ~ 0
     ),
     max = dplyr::case_when(
-      stringr::str_detect(column, "_percent$|_per_")              ~ 100,
-      column == "field_goal_longest_yards"                        ~ 75,
-      stringr::str_detect(column, "longest_yards$")               ~ 100,
-      column %in% c("passing_yards", "punting_yards")             ~ 6000,
-      stringr::str_detect(column, "_yards$")                      ~ 3000,
-      column %in% c("passing_attempts", "passing_completions")    ~ 700,
-      column == "rushing_carries"                                 ~ 450,
-      TRUE                                                        ~ 200
+      stringr::str_detect(column, "_percent$|_per_")             ~ 100,
+      column == "field_goal_longest_yards"                       ~ 75,
+      stringr::str_detect(column, "longest_yards$")              ~ 100,
+      column %in% c("passing_yards", "punting_yards")            ~ 6000,
+      stringr::str_detect(column, "_yards$")                     ~ 3000,
+      column %in% c("passing_attempts", "passing_completions")   ~ 700,
+      column == "rushing_carries"                                ~ 450,
+      TRUE                                                       ~ 200
     ),
     range_rule = dplyr::case_when(
-      stringr::str_detect(column, "_percent$")                    ~ 6L,
-      stringr::str_detect(column, "longest_yards$")               ~ 12L,
-      TRUE                                                        ~ 11L
-    ),
-    allowed_values = NA_character_, foreign_key = NA_character_
+      stringr::str_detect(column, "_percent$")                   ~ 6L,
+      stringr::str_detect(column, "longest_yards$")              ~ 12L,
+      TRUE                                                       ~ 11L
+    )
   )
 
+# Previous-school columns: one row for however many the merged data contains
+previous_spec = tibble::tibble(column = grep("^previous_school_\\d+$", names(fbs_players), value = TRUE),
+                               expected_type = "character", nullable = TRUE)
+
 column_spec = dplyr::bind_rows(
-  dplyr::mutate(id_spec, min = as.numeric(min), max = as.numeric(max), range_rule = as.integer(range_rule)),
+  dplyr::mutate(id_spec, dplyr::across(c(min, max), as.numeric), range_rule = as.integer(range_rule)),
+  previous_spec,
   stat_spec
 )
-stopifnot(setequal(column_spec$column, names(fbs_players)))                # every column specified exactly once
+stopifnot(setequal(column_spec$column, names(fbs_players)))          # every column specified exactly once
+```
 
-# ============================================================================
-# 4. Row-level checks: TRUE = the row BREAKS the rule
-# ============================================================================
+### Running the checks
+
+```{r validation_checks}
+# ---- Row-level checks: TRUE = the row BREAKS the rule; NA comparisons count as passing ----
 chk = function(rule, column, flags) {
   tibble::tibble(rule = as.integer(rule), column = column,
                  flags = list(tidyr::replace_na(as.logical(flags), FALSE)))
 }
-both = function(a, b) !is.na(a) & !is.na(b)
+not_in = function(x, allowed) !is.na(x) & !(as.character(x) %in% allowed)
 
-# Rule 2: presence
-presence_checks = purrr::map(c("school", "conference", "name", "position"),
-                             ~ chk(2, .x, is.na(fbs_players[[.x]]))) |> dplyr::bind_rows()
-
-# Rules 3-12: ranges, generated from the column specification
-range_checks = column_spec |>
-  dplyr::filter(!is.na(range_rule)) |>
-  purrr::pmap(function(column, min, max, range_rule, ...) {
-    x = fbs_players[[column]]
-    chk(range_rule, column, !is.na(x) & (x < min | x > max))
-  }) |>
-  dplyr::bind_rows()
-
-# Rules 13-23: codes
-row_state_fips = state_fips$state_code[match(as.character(fbs_players$hometown_state), state_fips$state)]
-position_ok    = purrr::map_lgl(stringr::str_split(as.character(fbs_players$position), "/"),
-                                ~ all(is.na(.x)) || all(.x %in% valid_positions))
-
-code_checks = dplyr::bind_rows(
-  chk(13, "conference", !(as.character(fbs_players$conference) %in% fbs_conferences)),
-  chk(14, "year", !is.na(fbs_players$year) & !(as.character(fbs_players$year) %in% as.character(1:8))),
-  chk(15, "position", !position_ok),
-  chk(16, "hometown_state", fbs_players$hometown_country %in% "United States" & !is.na(fbs_players$hometown_state) &
-        !(as.character(fbs_players$hometown_state) %in% usps_codes)),
-  chk(17, "hometown_country", !valid_country(fbs_players$hometown_country)),
-  chk(18, "hometown_geoid, hometown_state",
-      !is.na(fbs_players$hometown_geoid) & (!stringr::str_detect(fbs_players$hometown_geoid, "^\\d{7}$") |
-                                    is.na(row_state_fips) | substr(fbs_players$hometown_geoid, 1, 2) != row_state_fips)),
-  chk(19, "hometown_county_geoid, hometown_geoid",
-      !is.na(fbs_players$hometown_county_geoid) & (!stringr::str_detect(fbs_players$hometown_county_geoid, "^\\d{5}$") |
-                                           substr(fbs_players$hometown_county_geoid, 1, 2) != substr(fbs_players$hometown_geoid, 1, 2))),
-  chk(20, "player_id", !is.na(fbs_players$player_id) & !stringr::str_detect(fbs_players$player_id, "^\\d+$")),
-  chk(21, "match_method", !is.na(fbs_players$match_method) & !(as.character(fbs_players$match_method) %in% match_methods)),
-  chk(22, "hometown_place_type", !is.na(fbs_players$hometown_place_type) &
-        !(as.character(fbs_players$hometown_place_type) %in% census_place_types)),
-  chk(23, "hometown_median_income_censored", !is.na(fbs_players$hometown_median_income_censored) &
-        !(as.character(fbs_players$hometown_median_income_censored) %in% censored_levels))
-)
-
-# Rules 24-26: foreign keys
-place_geoids  = census_clean$geoid[census_clean$geography_level == "place"]
-county_geoids = census_clean$geoid[census_clean$geography_level == "county"]
-
-fk_checks = dplyr::bind_rows(
-  chk(24, "player_id", !is.na(fbs_players$player_id) & !(fbs_players$player_id %in% player_stats_clean$player_id)),
-  chk(25, "hometown_geoid", !is.na(fbs_players$hometown_geoid) & !(fbs_players$hometown_geoid %in% place_geoids)),
-  chk(26, "hometown_county_geoid", !is.na(fbs_players$hometown_county_geoid) & !(fbs_players$hometown_county_geoid %in% county_geoids))
-)
-
-# Rules 27-40: consistency
-schools_multi_conf = fbs_players |> dplyr::distinct(school, conference) |> dplyr::count(school) |>
-  dplyr::filter(n > 1) |> dplyr::pull(school)
-race_sum = rowSums(fbs_players[c("hometown_pct_white", "hometown_pct_black", "hometown_pct_asian",
-                       "hometown_pct_hispanic", "hometown_pct_other_race")])
-
-consistency_checks = dplyr::bind_rows(
-  chk(27, "passing_completions, passing_attempts",
-      both(fbs_players$passing_completions, fbs_players$passing_attempts) & fbs_players$passing_completions > fbs_players$passing_attempts),
-  chk(28, "field_goals_made, field_goals_attempted",
-      both(fbs_players$field_goals_made, fbs_players$field_goals_attempted) & fbs_players$field_goals_made > fbs_players$field_goals_attempted),
-  chk(29, "extra_points_made, extra_points_attempted",
-      both(fbs_players$extra_points_made, fbs_players$extra_points_attempted) & fbs_players$extra_points_made > fbs_players$extra_points_attempted),
-  chk(30, "fumbles_lost, fumbles", both(fbs_players$fumbles_lost, fbs_players$fumbles) & fbs_players$fumbles_lost > fbs_players$fumbles),
-  chk(31, "tackles_solo, tackles_total", both(fbs_players$tackles_solo, fbs_players$tackles_total) & fbs_players$tackles_solo > fbs_players$tackles_total),
-  chk(32, "rushing_touchdowns, rushing_carries",
-      both(fbs_players$rushing_touchdowns, fbs_players$rushing_carries) & fbs_players$rushing_touchdowns > fbs_players$rushing_carries),
-  chk(33, "receiving_touchdowns, receptions",
-      both(fbs_players$receiving_touchdowns, fbs_players$receptions) & fbs_players$receiving_touchdowns > fbs_players$receptions),
-  chk(34, "completion_percent, passing_completions, passing_attempts",
-      both(fbs_players$completion_percent, fbs_players$passing_attempts) & fbs_players$passing_attempts > 0 &
-        abs(fbs_players$passing_completions / fbs_players$passing_attempts * 100 - fbs_players$completion_percent) > 1),
-  chk(35, "kicking_points, field_goals_made, extra_points_made",
-      both(fbs_players$kicking_points, fbs_players$field_goals_made) & !is.na(fbs_players$extra_points_made) &
-        fbs_players$kicking_points != 3 * fbs_players$field_goals_made + fbs_players$extra_points_made),
-  chk(36, "rushing_yards_per_carry, rushing_yards, rushing_carries",
-      both(fbs_players$rushing_yards_per_carry, fbs_players$rushing_carries) & fbs_players$rushing_carries > 0 &
-        abs(fbs_players$rushing_yards / fbs_players$rushing_carries - fbs_players$rushing_yards_per_carry) > 0.15),
-  chk(37, "match_method, player_id", is.na(fbs_players$match_method) != is.na(fbs_players$player_id)),
-  chk(38, "school, conference", fbs_players$school %in% schools_multi_conf),
-  chk(39, "hometown_pct_white, hometown_pct_black, hometown_pct_asian, hometown_pct_hispanic, hometown_pct_other_race",
-      !is.na(race_sum) & abs(race_sum - 100) > 0.01),
-  chk(40, "hometown_median_income_censored, hometown_median_income",
-      !is.na(fbs_players$hometown_median_income) &
-        (fbs_players$hometown_median_income %in% c(2500, 250000)) != !is.na(fbs_players$hometown_median_income_censored))
-)
-
-# Rules 41, 42, 45: uniqueness / only players
-player_key   = paste(fbs_players$school, fbs_players$name, fbs_players$position, fbs_players$hometown_city, sep = "|")
-staff_terms  = "(?i)\\b(coach|coordinator|director|analyst|trainer|manager)\\b"
-
-uniqueness_checks = dplyr::bind_rows(
-  chk(41, "player_id", !is.na(fbs_players$player_id) & (duplicated(fbs_players$player_id) | duplicated(fbs_players$player_id, fromLast = TRUE))),
-  chk(42, "school, name, position, hometown_city", duplicated(player_key) | duplicated(player_key, fromLast = TRUE)),
-  chk(45, "name, position",
-      stringr::str_detect(fbs_players$name, staff_terms) | stringr::str_detect(as.character(fbs_players$position), staff_terms) |
-        stringr::str_detect(fbs_players$name, "(?i)^in memory|impact") |
-        stringr::str_detect(as.character(fbs_players$position), "(?i)impact|^captain$"))
-)
-
-# Rules 50, 52, 56, 58: business rules (row level)
-business_checks = dplyr::bind_rows(
-  chk(50, "school, name, position, hometown_city", duplicated(player_key)),
-  chk(52, "position", stringr::str_detect(as.character(fbs_players$position), "/")),
-  chk(56, "hometown_population", !is.na(fbs_players$hometown_geoid) & fbs_players$hometown_population %in% 0),
-  chk(58, "hometown_city, hometown_state, hometown_geoid",
-      fbs_players$hometown_country %in% "United States" & !is.na(fbs_players$hometown_city) &
-        !is.na(fbs_players$hometown_state) & is.na(fbs_players$hometown_geoid))
-)
-
-# Rules 60-61: robust z-scores within position
 robust_z = function(x) {
   s = stats::mad(x, na.rm = TRUE)
   if (is.na(s) || s == 0) return(rep(0, length(x)))
   (x - stats::median(x, na.rm = TRUE)) / s
 }
-z = fbs_players |>
-  dplyr::group_by(position) |>
-  dplyr::mutate(z_weight = robust_z(weight_lbs), z_height = robust_z(height_in)) |>
-  dplyr::ungroup()
 
-probabilistic_checks = dplyr::bind_rows(
+# Helper vectors
+row_state_fips  = state_fips$state_code[match(as.character(fbs_players$hometown_state), state_fips$state)]
+position_ok     = purrr::map_lgl(stringr::str_split(as.character(fbs_players$position), "/"),
+                                 ~ all(is.na(.x)) || all(.x %in% valid_positions))
+country_ok      = is.na(fbs_players$hometown_country) | fbs_players$hometown_country %in% uk_constituents |
+                  !is.na(suppressWarnings(countrycode::countryname(as.character(fbs_players$hometown_country),
+                                                                   destination = "iso3c", warn = FALSE)))
+race_sum        = rowSums(fbs_players[c("hometown_pct_white", "hometown_pct_black", "hometown_pct_asian",
+                                        "hometown_pct_hispanic", "hometown_pct_other_race")])
+multi_conf      = fbs_players |> dplyr::distinct(school, conference) |> dplyr::count(school) |>
+                  dplyr::filter(n > 1) |> dplyr::pull(school)
+player_key      = paste(fbs_players$school, fbs_players$name, fbs_players$position, fbs_players$hometown_city, sep = "|")
+staff_terms     = "(?i)\\b(coach|coordinator|director|analyst|trainer|manager)\\b"
+census_keys     = paste(census_clean$geography_level, census_clean$geoid)
+level_key       = c("Place" = "place", "County subdivision" = "county subdivision", "County" = "county")
+hometown_key    = paste(level_key[as.character(fbs_players$hometown_match_level)], fbs_players$hometown_geoid)
+county_geoids   = census_clean$geoid[census_clean$geography_level == "county"]
+expected_digits = geoid_digits[as.character(fbs_players$hometown_match_level)]
+z               = fbs_players |>
+                  dplyr::group_by(position) |>
+                  dplyr::mutate(z_weight = robust_z(weight_lbs), z_height = robust_z(height_in)) |>
+                  dplyr::ungroup()
+
+# Rules 3-12: ranges, generated from the column constraints
+range_checks = column_spec |>
+  dplyr::filter(!is.na(range_rule)) |>
+  purrr::pmap(function(column, min, max, range_rule, ...) {
+    x = fbs_players[[column]]
+    chk(range_rule, column, x < min | x > max)
+  }) |>
+  dplyr::bind_rows()
+
+# All other row-level rules
+rule_checks = with(fbs_players, dplyr::bind_rows(
+  # Presence
+  purrr::map(c("school", "conference", "name", "position"), ~ chk(2, .x, is.na(fbs_players[[.x]]))),
+  # Code
+  chk(13, "conference",          !(as.character(conference) %in% fbs_conferences)),
+  chk(14, "year",                not_in(year, as.character(1:8))),
+  chk(15, "position",            !position_ok),
+  chk(16, "hometown_state",      hometown_country %in% "United States" & not_in(hometown_state, usps_codes)),
+  chk(17, "hometown_country",    !country_ok),
+  chk(18, "hometown_geoid, hometown_match_level, hometown_state",
+      is.na(hometown_geoid) != is.na(hometown_match_level) |
+        (!is.na(hometown_geoid) & (!stringr::str_detect(hometown_geoid, "^\\d+$") | nchar(hometown_geoid) != expected_digits |
+                                     is.na(row_state_fips) | substr(hometown_geoid, 1, 2) != row_state_fips))),
+  chk(19, "hometown_county_geoid, hometown_geoid",
+      !stringr::str_detect(hometown_county_geoid, "^\\d{5}$") | substr(hometown_county_geoid, 1, 2) != substr(hometown_geoid, 1, 2)),
+  chk(20, "player_id",           !stringr::str_detect(player_id, "^\\d+$")),
+  chk(21, "match_method",        not_in(match_method, match_methods)),
+  chk(22, "hometown_place_type", not_in(hometown_place_type, census_place_types)),
+  chk(23, "hometown_median_income_censored", not_in(hometown_median_income_censored, censored_levels)),
+  # Foreign key
+  chk(24, "player_id",             not_in(player_id, player_stats_clean$player_id)),
+  chk(25, "hometown_geoid, hometown_match_level", !is.na(hometown_geoid) & !(hometown_key %in% census_keys)),
+  chk(26, "hometown_county_geoid", not_in(hometown_county_geoid, county_geoids)),
+  # Consistency
+  chk(27, "passing_completions, passing_attempts",          passing_completions > passing_attempts),
+  chk(28, "field_goals_made, field_goals_attempted",        field_goals_made > field_goals_attempted),
+  chk(29, "extra_points_made, extra_points_attempted",      extra_points_made > extra_points_attempted),
+  chk(30, "fumbles_lost, fumbles",                          fumbles_lost > fumbles),
+  chk(31, "tackles_solo, tackles_total",                    tackles_solo > tackles_total),
+  chk(32, "rushing_touchdowns, rushing_carries",            rushing_touchdowns > rushing_carries),
+  chk(33, "receiving_touchdowns, receptions",               receiving_touchdowns > receptions),
+  chk(34, "completion_percent, passing_completions, passing_attempts",
+      passing_attempts > 0 & abs(passing_completions / passing_attempts * 100 - completion_percent) > 1),
+  chk(35, "kicking_points, field_goals_made, extra_points_made",
+      kicking_points != 3 * field_goals_made + extra_points_made),
+  chk(36, "rushing_yards_per_carry, rushing_yards, rushing_carries",
+      rushing_carries > 0 & abs(rushing_yards / rushing_carries - rushing_yards_per_carry) > 0.15),
+  chk(37, "match_method, player_id",                        is.na(match_method) != is.na(player_id)),
+  chk(38, "school, conference",                             school %in% multi_conf),
+  chk(39, "hometown_pct_white, hometown_pct_black, hometown_pct_asian, hometown_pct_hispanic, hometown_pct_other_race",
+      abs(race_sum - 100) > 0.01),
+  chk(40, "hometown_median_income_censored, hometown_median_income",
+      !is.na(hometown_median_income) & (hometown_median_income %in% c(2500, 250000)) != !is.na(hometown_median_income_censored)),
+  # Uniqueness
+  chk(41, "player_id",  !is.na(player_id) & (duplicated(player_id) | duplicated(player_id, fromLast = TRUE))),
+  chk(42, "school, name, position, hometown_city", duplicated(player_key) | duplicated(player_key, fromLast = TRUE)),
+  chk(45, "name, position",
+      stringr::str_detect(name, staff_terms) | stringr::str_detect(name, "(?i)^in memory|impact") |
+        stringr::str_detect(as.character(position), paste0(staff_terms, "|impact|^captain$"))),
+  # Business rules
+  chk(50, "school, name, position, hometown_city", duplicated(player_key)),
+  chk(52, "position",            stringr::str_detect(as.character(position), "/")),
+  chk(56, "hometown_population", !is.na(hometown_geoid) & hometown_population %in% 0),
+  chk(58, "hometown_city, hometown_state, hometown_geoid",
+      hometown_country %in% "United States" & !is.na(hometown_city) & !is.na(hometown_state) & is.na(hometown_geoid)),
+  # Probabilistic
   chk(60, "weight_lbs", abs(z$z_weight) > 3.5),
   chk(61, "height_in",  abs(z$z_height) > 3.5)
-)
+))
 
-row_checks = dplyr::bind_rows(presence_checks, range_checks, code_checks, fk_checks, consistency_checks,
-                              uniqueness_checks, business_checks, probabilistic_checks)
+row_checks = dplyr::bind_rows(range_checks, rule_checks)
 
-# ============================================================================
-# 5. Table- and group-level checks
-# ============================================================================
+# ---- Table- and group-level checks ----
 type_ok = function(x, expected) {
   switch(expected,
          "factor"       = is.factor(x),
          "character"    = is.character(x),
          "numeric"      = is.numeric(x),
-         "whole number" = is.numeric(x) && all(is.na(x) | x == round(x)))
+         "whole number" = is.numeric(x) && all(x == round(x), na.rm = TRUE))
 }
 column_spec$type_ok = purrr::map2_lgl(column_spec$column, column_spec$expected_type, ~ type_ok(fbs_players[[.x]], .y))
 
-# Rules 46-49: API keys
+# Rules 46-49: API keys (key names are checked; values are never printed)
 renviron_path = here::here(".Renviron")
 renviron      = if (file.exists(renviron_path)) readLines(renviron_path, warn = FALSE) else character()
 rmd_files     = list.files(here::here(), pattern = "\\.Rmd$", recursive = TRUE, full.names = TRUE)
-hardcoded     = purrr::keep(rmd_files, function(f) {
-  any(stringr::str_detect(readLines(f, warn = FALSE),
-                          "(?i)(api_?key|bearer|token)\\s*(=|<-)\\s*[\"'][A-Za-z0-9+/=_-]{20,}[\"']"))
-})
+hardcoded     = purrr::keep(rmd_files, ~ any(stringr::str_detect(
+  readLines(.x, warn = FALSE), "(?i)(api_?key|bearer|token)\\s*(=|<-)\\s*[\"'][A-Za-z0-9+/=_-]{20,}[\"']")))
 gitignore     = here::here(".gitignore")
 keys_ignored  = file.exists(gitignore) && any(stringr::str_detect(readLines(gitignore, warn = FALSE), "^/?\\.Renviron$"))
 
 # Rule 55: variables the research question needs
 needed = c(players = "name", population = "hometown_population", income = "hometown_median_income",
            density = "hometown_population_density", education = "hometown_bachelors_or_higher",
-           poverty = "hometown_poverty_rate", university_proximity = "hometown_university_distance_mi")
-needed_missing = names(needed)[!needed %in% names(fbs_players)]
+           poverty = "hometown_poverty_rate")
+needed_missing = needed[!needed %in% names(fbs_players)]
 
-# Rule 57: community table built from EVERY Census place, including those with zero players
+# Rule 57: community table built from EVERY Census place, including places with zero players
 community = census_clean |>
   dplyr::filter(geography_level == "place") |>
-  dplyr::left_join(dplyr::count(dplyr::filter(fbs_players, !is.na(hometown_geoid)), hometown_geoid, name = "players"),
-                   by = c("geoid" = "hometown_geoid")) |>
+  dplyr::left_join(dplyr::count(fbs_players, hometown_geoid, name = "players"), by = c("geoid" = "hometown_geoid")) |>
   dplyr::mutate(players         = dplyr::coalesce(players, 0L),
                 players_per_10k = dplyr::if_else(population > 0, players / population * 1e4, NA_real_))
 
@@ -524,158 +491,493 @@ missingness_spikes = purrr::map_dfr(c("year", "height_in", "weight_lbs", "hometo
 # Rule 64: KS test, Census-matched vs unmatched US players
 us_rows = fbs_players$hometown_country %in% "United States"
 ks_results = purrr::map_dfr(c("height_in", "weight_lbs"), function(col) {
-  a = fbs_players[[col]][us_rows & !is.na(fbs_players$hometown_geoid)]
-  b = fbs_players[[col]][us_rows & is.na(fbs_players$hometown_geoid)]
-  t = suppressWarnings(stats::ks.test(a[!is.na(a)], b[!is.na(b)]))
+  x = fbs_players[[col]]
+  t = suppressWarnings(stats::ks.test(stats::na.omit(x[us_rows & !is.na(fbs_players$hometown_geoid)]),
+                                      stats::na.omit(x[us_rows &  is.na(fbs_players$hometown_geoid)])))
   tibble::tibble(column = col, D = unname(t$statistic), p_value = t$p.value)
 })
 
+wrong_type_cols = paste(column_spec$column[!column_spec$type_ok], collapse = ", ")
+
 table_checks = tibble::tribble(
-  ~rule, ~passed,                                                              ~detail,
-  1,  all(column_spec$type_ok),                                                paste(sum(!column_spec$type_ok), "column(s) with the wrong type"),
-  43, dplyr::n_distinct(fbs_players$school) == 139,                            paste(dplyr::n_distinct(fbs_players$school), "schools"),
-  44, dplyr::n_distinct(fbs_players$conference) == 11,                         paste(dplyr::n_distinct(fbs_players$conference), "conferences"),
-  46, file.exists(renviron_path),                                              renviron_path,
-  47, all(c("CFBD_API_KEY", "CENSUS_API_KEY") %in% trimws(sub("=.*$", "", renviron))), "Key names checked; values not printed",
-  48, length(hardcoded) == 0,                                                  if (length(hardcoded)) paste(basename(hardcoded), collapse = ", ") else paste(length(rmd_files), ".Rmd files scanned"),
-  49, keys_ignored,                                                            if (file.exists(gitignore)) ".gitignore checked" else "No .gitignore found",
-  51, FALSE,                                                                   "previous_school_1-4 is a repeating group (kept wide on purpose); multi-position cells flagged under rule 52",
-  53, all(stringr::str_detect(names(fbs_players), "^[a-z][a-z0-9_]*$")),       paste(ncol(fbs_players), "column names checked"),
-  54, all(column_spec$type_ok),                                                "Same test as rule 1",
-  55, length(needed_missing) == 0,                                             if (length(needed_missing)) paste("Missing:", paste(needed_missing, collapse = ", ")) else "All present",
-  57, any(community$players == 0),                                             paste(sum(community$players == 0), "of", nrow(community), "Census places kept with 0 players"),
-  59, nrow(stats_unmatched) == 0,                                              paste(nrow(stats_unmatched), "of", nrow(player_stats_clean), "CFBD players unmatched"),
-  62, nrow(roster_outliers) == 0,                                              if (nrow(roster_outliers)) paste(roster_outliers$school, roster_outliers$players, collapse = "; ") else "None",
-  63, nrow(missingness_spikes) == 0,                                           if (nrow(missingness_spikes)) paste(unique(paste0(missingness_spikes$school, " (", missingness_spikes$column, ")")), collapse = "; ") else "None",
-  64, all(ks_results$p_value > 0.01),                                          paste0(ks_results$column, ": D = ", round(ks_results$D, 3), ", p = ", signif(ks_results$p_value, 2), collapse = "; ")
+  ~rule, ~passed,                                                         ~column,                                                   ~detail,
+  1,  all(column_spec$type_ok),                                           wrong_type_cols,                                           paste(sum(!column_spec$type_ok), "column(s) with the wrong type"),
+  43, dplyr::n_distinct(fbs_players$school) == 139,                       "school",                                                  paste(dplyr::n_distinct(fbs_players$school), "schools"),
+  44, dplyr::n_distinct(fbs_players$conference) == 11,                    "conference",                                              paste(dplyr::n_distinct(fbs_players$conference), "conferences"),
+  46, file.exists(renviron_path),                                         NA,                                                        "Looked for .Renviron in the project root",
+  47, all(c("CFBD_API_KEY", "CENSUS_API_KEY") %in% trimws(sub("=.*$", "", renviron))), NA,                                       "Key names checked; values not printed",
+  48, length(hardcoded) == 0,                                             NA,                                                        if (length(hardcoded)) paste("Hard-coded key in", paste(basename(hardcoded), collapse = ", ")) else paste(length(rmd_files), ".Rmd files scanned"),
+  49, keys_ignored,                                                       NA,                                                        if (file.exists(gitignore)) ".Renviron not listed in .gitignore" else "No .gitignore found",
+  51, FALSE,                                                              paste(previous_spec$column, collapse = ", "),             paste0("previous_school_1-", nrow(previous_spec), " is a repeating group (kept wide on purpose); multi-position cells flagged under rule 52"),
+  53, all(stringr::str_detect(names(fbs_players), "^[a-z][a-z0-9_]*$")),  NA,                                                        paste(ncol(fbs_players), "column names checked"),
+  54, all(column_spec$type_ok),                                           wrong_type_cols,                                           "Same test as rule 1",
+  55, length(needed_missing) == 0,                                        paste(needed_missing, collapse = ", "),                    paste("Missing:", paste(names(needed_missing), collapse = ", ")),
+  57, any(community$players == 0),                                        NA,                                                        paste(sum(community$players == 0), "of", nrow(community), "Census places kept with 0 players"),
+  59, nrow(stats_unmatched) == 0,                                         "player_id",                                               paste(nrow(stats_unmatched), "of", nrow(player_stats_clean), "CFBD players unmatched"),
+  62, nrow(roster_outliers) == 0,                                         "school",                                                  paste0("IQR fences ", round(fences[1], 1), " to ", round(fences[2], 1)),
+  63, nrow(missingness_spikes) == 0,                                      paste(unique(missingness_spikes$column), collapse = ", "), paste(nrow(missingness_spikes), "school/column combinations flagged"),
+  64, all(ks_results$p_value > 0.01),                                     "height_in, weight_lbs",                                   paste0(ks_results$column, ": D = ", round(ks_results$D, 3), ", p = ", signif(ks_results$p_value, 2), collapse = "; ")
 ) |>
   dplyr::mutate(rule = as.integer(rule))
+```
 
-# ============================================================================
-# 6. Rule results: one line per rule (all 64)
-# ============================================================================
-any_row = function(fl) Reduce(`|`, fl, init = rep(FALSE, nrow(fbs_players)))
+### Building the validation table
 
-row_rule_counts = row_checks |>
-  dplyr::group_by(rule) |>
-  dplyr::summarise(columns = paste(unique(column), collapse = "; "),
-                   rows_flagged = sum(any_row(flags)), .groups = "drop")
-
-rule_results = rule_catalog |>
-  dplyr::left_join(row_rule_counts, by = "rule") |>
-  dplyr::left_join(table_checks, by = "rule") |>
-  dplyr::mutate(
-    level  = dplyr::if_else(!is.na(rows_flagged), "Row", "Table"),
-    result = dplyr::case_when(
-      level == "Row"   & rows_flagged == 0 ~ "Pass",
-      level == "Table" & passed            ~ "Pass",
-      TRUE                                 ~ "Fail"
+```{r validation_build}
+# Expected constraint for each column, taken from the column constraints
+constraints = column_spec |>
+  dplyr::transmute(
+    column, nullable, foreign_key,
+    expected_value = dplyr::case_when(
+      !is.na(min)            ~ paste("Between", format(min, big.mark = ",", scientific = FALSE, trim = TRUE),
+                                     "and",     format(max, big.mark = ",", scientific = FALSE, trim = TRUE)),
+      !is.na(allowed_values) ~ paste("One of:", allowed_values)
     )
-  ) |>
-  dplyr::select(rule, category, level, description, columns, rows_flagged, detail, result)
+  )
 
-stopifnot(nrow(rule_results) == 64, !any(is.na(rule_results$result)))   # every rule evaluated
-
-# ============================================================================
-# 7. Validation table: one entry per table and column
-# ============================================================================
-observed = purrr::map_dfr(column_spec$column, function(col) {
-  x   = fbs_players[[col]]
-  num = is.numeric(x) && any(!is.na(x))
-  tibble::tibble(column        = col,
-                 observed_type = class(x)[1],
-                 n_missing     = sum(is.na(x)),
-                 observed_min  = if (num) as.numeric(min(x, na.rm = TRUE)) else NA_real_,
-                 observed_max  = if (num) as.numeric(max(x, na.rm = TRUE)) else NA_real_)
-})
-
-rules_by_column = row_checks |>
-  dplyr::mutate(col = stringr::str_split(column, ",\\s*")) |>
-  tidyr::unnest(col) |>
-  dplyr::group_by(col) |>
-  dplyr::summarise(rules        = paste(sort(unique(rule)), collapse = ", "),
-                   rows_flagged = sum(any_row(flags)),
-                   .groups = "drop")
-
-validation_table = column_spec |>
-  dplyr::left_join(observed, by = "column") |>
-  dplyr::left_join(rules_by_column, by = c("column" = "col")) |>
-  dplyr::mutate(
-    table         = "fbs_players_merged",
-    rules         = dplyr::if_else(is.na(rules), "1", paste("1,", rules)),          # rule 1 applies to every column
-    rows_flagged  = dplyr::coalesce(rows_flagged, 0L),
-    pct_missing   = round(n_missing / nrow(fbs_players) * 100, 1),
-    status = dplyr::case_when(
-      !type_ok | (!nullable & n_missing > 0) | rows_flagged > 0 ~ "Fail",
-      TRUE                                                      ~ "Pass"
-    )
-  ) |>
-  dplyr::select(table, column, source_table, expected_type, observed_type, type_ok,
-                nullable, n_missing, pct_missing,
-                min_allowed = min, max_allowed = max, observed_min, observed_max,
-                allowed_values, foreign_key, rules, rows_flagged, status)
-
-# ============================================================================
-# 8. The rows that break each rule
-# ============================================================================
-row_violations = purrr::pmap(row_checks, function(rule, column, flags) {
-  idx = which(flags)
-  if (length(idx) == 0) return(NULL)
-  cols = intersect(stringr::str_split(column, ",\\s*")[[1]], names(fbs_players))
-  vals = purrr::map(cols, ~ paste0(.x, " = ", as.character(fbs_players[[.x]][idx])))
-  tibble::tibble(rule, table = "fbs_players_merged", row = idx,
-                 school = as.character(fbs_players$school[idx]), name = fbs_players$name[idx],
-                 position = as.character(fbs_players$position[idx]),
-                 value = if (length(vals)) do.call(paste, c(vals, sep = "; ")) else NA_character_)
-}) |>
+# Row level: one entry per observation that breaks a rule
+row_violations = row_checks |>
+  dplyr::filter(purrr::map_lgl(flags, any)) |>
+  purrr::pmap(function(rule, column, flags) {
+    idx  = which(flags)
+    cols = intersect(stringr::str_split(column, ",\\s*")[[1]], names(fbs_players))
+    tibble::tibble(rule, column, row = idx,
+                   school   = as.character(fbs_players$school[idx]),
+                   name     = fbs_players$name[idx],
+                   position = as.character(fbs_players$position[idx]),
+                   observed_value = purrr::map(cols, ~ paste0(.x, " = ", fbs_players[[.x]][idx])) |>
+                     purrr::reduce(paste, sep = "; "))
+  }) |>
   dplyr::bind_rows()
 
+# Group level: unmatched CFBD players, roster-size outliers, missingness spikes
 group_violations = dplyr::bind_rows(
-  tibble::tibble(rule = 59L, table = "player_stats_clean", row = NA_integer_,
+  tibble::tibble(rule = 59L, column = "player_id",
                  school = as.character(stats_unmatched$school), name = stats_unmatched$name,
                  position = as.character(stats_unmatched$position),
-                 value = paste0("player_id = ", stats_unmatched$player_id)),
-  tibble::tibble(rule = 62L, table = "fbs_players_merged", row = NA_integer_,
-                 school = as.character(roster_outliers$school), name = NA_character_, position = NA_character_,
-                 value = paste0("roster size = ", roster_outliers$players,
-                                " (fences ", round(fences[1], 1), "-", round(fences[2], 1), ")")),
-  tibble::tibble(rule = 63L, table = "fbs_players_merged", row = NA_integer_,
-                 school = as.character(missingness_spikes$school), name = NA_character_, position = NA_character_,
-                 value = paste0(missingness_spikes$column, ": ", round(missingness_spikes$pct_missing * 100, 1),
-                                "% missing vs ", round(missingness_spikes$overall_pct * 100, 1), "% overall"))
+                 observed_value = paste0("player_id = ", stats_unmatched$player_id, " (in player_stats_clean, no roster match)")),
+  tibble::tibble(rule = 62L, column = "school", school = as.character(roster_outliers$school),
+                 observed_value = paste0("roster size = ", roster_outliers$players)),
+  tibble::tibble(rule = 63L, column = missingness_spikes$column, school = as.character(missingness_spikes$school),
+                 observed_value = paste0(round(missingness_spikes$pct_missing * 100, 1), "% missing vs ",
+                                         round(missingness_spikes$overall_pct * 100, 1), "% overall"))
 )
 
-violations = dplyr::bind_rows(row_violations, group_violations) |>
-  dplyr::left_join(dplyr::select(rule_catalog, rule, category, description), by = "rule") |>
-  dplyr::relocate(rule, category, description) |>
-  dplyr::arrange(rule, school, name)
+# Table level: failed rules that apply to the whole dataset rather than to one observation
+table_violations = table_checks |>
+  dplyr::filter(!passed, !rule %in% c(59L, 62L, 63L)) |>
+  dplyr::transmute(rule, column, observed_value = detail)
 
-# ============================================================================
-# 9. Display
-# ============================================================================
-knitr::kable(validation_table, digits = 2,
-             caption = "Validation table: type, nullability, value constraints, codes, foreign keys and results for every column")
+# ---- Validation table: every observation that breaks a rule ----
+validation_table = dplyr::bind_rows(row_violations, group_violations, table_violations) |>
+  dplyr::left_join(rule_catalog, by = "rule") |>
+  dplyr::left_join(constraints, by = "column") |>
+  dplyr::mutate(
+    level = dplyr::case_when(!is.na(row) ~ "Row", !is.na(school) ~ "Group", TRUE ~ "Table"),
+    expected = dplyr::case_when(
+      category == "Presence"                         ~ "Not null",
+      category %in% c("Range", "Code") & !is.na(expected_value) ~ expected_value,
+      category == "Foreign key"                      ~ paste("Must exist in", foreign_key),
+      TRUE                                           ~ description
+    )
+  ) |>
+  dplyr::arrange(rule, school, name) |>
+  dplyr::mutate(violation_id = dplyr::row_number()) |>
+  dplyr::select(violation_id, rule, check_type, category, level, column, nullable, foreign_key,
+                expected, observed_value, row, school, name, position)
 
-knitr::kable(rule_results, caption = "Results for all 64 validation rules")
-
-violations |>
+# ---- Rule results: one line per rule, all 64 ----
+flagged_counts = validation_table |>
   dplyr::group_by(rule) |>
-  dplyr::slice_head(n = 10) |>
-  dplyr::ungroup() |>
-  dplyr::select(rule, table, school, name, position, value) |>
-  knitr::kable(caption = "Rows that break each rule (first 10 per rule; the full list is saved to CSV)")
+  dplyr::summarise(violations = dplyr::n(), rows_flagged = dplyr::n_distinct(row, na.rm = TRUE), .groups = "drop")
+
+rule_results = rule_catalog |>
+  dplyr::left_join(flagged_counts, by = "rule") |>
+  dplyr::mutate(
+    dplyr::across(c(violations, rows_flagged), ~ dplyr::coalesce(.x, 0L)),
+    level  = dplyr::case_when(rule %in% c(59L, 62L, 63L)    ~ "Group",
+                              rule %in% table_checks$rule ~ "Table",
+                              TRUE                        ~ "Row"),
+    result = dplyr::if_else(violations == 0, "Pass", "Fail")
+  ) |>
+  dplyr::select(rule, category, check_type, level, description, violations, rows_flagged, result)
+
+stopifnot(nrow(rule_results) == 64)
+
+# ---- Summary: how many observations break each kind of check ----
+violation_summary = validation_table |>
+  dplyr::group_by(check_type) |>
+  dplyr::summarise(rules        = paste(sort(unique(rule)), collapse = ", "),
+                   violations   = dplyr::n(),
+                   observations = dplyr::n_distinct(row, na.rm = TRUE),
+                   .groups = "drop") |>
+  dplyr::arrange(dplyr::desc(violations))
 
 message("Rules passed: ", sum(rule_results$result == "Pass"),
-        " | Failed: ", sum(rule_results$result == "Fail"))
+        " | Failed: ", sum(rule_results$result == "Fail"),
+        " | Violations: ", nrow(validation_table),
+        " across ", dplyr::n_distinct(validation_table$row, na.rm = TRUE), " roster rows")
 
 # ---- Save ----
 validation_dir = file.path(processed_dir, "validation")
 dir.create(validation_dir, recursive = TRUE, showWarnings = FALSE)
 readr::write_csv(validation_table, file.path(validation_dir, "validation_table.csv"))
 readr::write_csv(rule_results,     file.path(validation_dir, "validation_rule_results.csv"))
-readr::write_csv(violations,       file.path(validation_dir, "validation_violations.csv"))
+```
+
+---
+
+### Table 1: Validation table — observations that break a rule
+
+One row per observation that violates a rule: impossible values, duplicate entries, invalid categories, failed joins, inconsistent values, statistical outliers and business-rule failures. Each row shows the column involved, its nullability and foreign key, the expected constraint and the observed value. Rows with `level = "Group"` describe a school or an unmatched source record; rows with `level = "Table"` describe a rule that fails for the dataset as a whole. The first 10 violations per rule are shown; the full table is saved to `validation_table.csv`.
+
+```{r table_validation}
+validation_table |>
+  dplyr::group_by(rule) |>
+  dplyr::slice_head(n = 10) |>
+  dplyr::ungroup() |>
+  knitr::kable()
+```
+
+---
+
+### Table 2: Violations by check type
+
+How many violations of each kind were found, which rules found them, and how many distinct roster rows are affected.
+
+```{r table_violation_summary}
+knitr::kable(violation_summary)
+```
+
+---
+
+### Table 3: Results for all 64 validation rules
+
+Whether each rule passed or failed, whether it is checked row by row or on the whole table, and how many violations it produced.
+
+```{r table_rule_results}
+knitr::kable(rule_results)
+```
+
+---
+
+### Table 4: Before vs. after the data fixes
+
+Violations for each rule in the original validation run (saved in `validation/baseline/`) compared with this run, and how each remaining issue was resolved. Only rules that failed in either run are shown.
+
+```{r table_before_after}
+baseline_file = file.path(validation_dir, "baseline", "validation_rule_results.csv")
+
+if (file.exists(baseline_file)) {
+  # How each issue found in the original run was handled (used in the write-up)
+  resolution = tibble::tribble(
+    ~rule, ~resolution,
+    32, "Accepted: touchdowns on laterals or fumble recoveries need no carry",
+    51, "Accepted: previous schools kept wide on purpose",
+    52, "Accepted: multi-position players (e.g. Kicker/Punter) kept as listed",
+    55, "Resolved: university proximity removed from scope of the research question",
+    56, "Fixed: zero-population places replaced with their county's data",
+    58, "Reduced: county subdivision and county matching added; remainder too granular for the ACS",
+    59, "Reduced: similar-name matching pass added; remainder likely left the roster",
+    60, "Verified: extreme cases match the schools' published rosters",
+    61, "Verified: extreme cases match the schools' published rosters",
+    62, "Verified: roster counts match the schools' published rosters",
+    63, "Documented: fields not published by the source sites",
+    64, "Documented: unmatched hometowns are not a random sample"
+  ) |>
+    dplyr::mutate(rule = as.integer(rule))
+
+  before_after = readr::read_csv(baseline_file, show_col_types = FALSE) |>
+    dplyr::select(rule, violations_before = violations, result_before = result) |>
+    dplyr::right_join(dplyr::select(rule_results, rule, description, violations_after = violations,
+                                    result_after = result), by = "rule") |>
+    dplyr::mutate(change = violations_after - violations_before) |>
+    dplyr::left_join(resolution, by = "rule") |>
+    dplyr::filter(result_before == "Fail" | result_after == "Fail") |>
+    dplyr::select(rule, description, violations_before, violations_after, change,
+                  result_before, result_after, resolution)
+
+  knitr::kable(before_after)
+} else {
+  message("No baseline found at ", baseline_file, ". Save the original validation CSVs there to compare.")
+}
 ```
 
 ## Descriptive summaries
 
-Summary statistics, data quality checks, and exploratory charts.
+Summary statistics, data quality checks and exploratory charts for the merged dataset (`fbs_players`). The Census table (`census_clean`) is used only where the merged data cannot supply the number: state populations for per-capita rates, and the Census places that produced no FBS players, which never appear in the merged data but are needed so per-capita comparisons are not biased upward (rule 57).
+
+```{r summary_setup}
+# Position groups: the first listed position decides the group ("Kicker/Punter" -> Special Teams)
+position_groups = c(
+  "Quarterback" = "Quarterback",
+  "Running Back" = "Running Back", "Fullback" = "Running Back", "Slotback" = "Running Back",
+  "Wide Receiver" = "Wide Receiver", "Slot Receiver" = "Wide Receiver",
+  "Tight End" = "Tight End",
+  "Offensive Lineman" = "Offensive Line", "Interior Offensive Lineman" = "Offensive Line",
+  "Offensive Tackle" = "Offensive Line", "Offensive Guard" = "Offensive Line", "Center" = "Offensive Line",
+  "Defensive Lineman" = "Defensive Line", "Defensive End" = "Defensive Line", "End" = "Defensive Line",
+  "Defensive Tackle" = "Defensive Line", "Nose Tackle" = "Defensive Line", "Edge Rusher" = "Defensive Line",
+  "Jack" = "Defensive Line", "Bandit" = "Defensive Line",
+  "Linebacker" = "Linebacker", "Outside Linebacker" = "Linebacker", "Inside Linebacker" = "Linebacker",
+  "Money Backer" = "Linebacker",
+  "Defensive Back" = "Defensive Back", "Cornerback" = "Defensive Back", "Safety" = "Defensive Back",
+  "Nickelback" = "Defensive Back", "Star" = "Defensive Back", "Spur" = "Defensive Back", "Viper" = "Defensive Back",
+  "Kicker" = "Special Teams", "Punter" = "Special Teams", "Long Snapper" = "Special Teams",
+  "Athlete" = "Unassigned"
+)
+
+players = fbs_players |>
+  dplyr::mutate(
+    position_group = unname(position_groups[stringr::str_remove(as.character(position), "/.*$")]),
+    position_group = factor(position_group, levels = unique(position_groups)),
+    us_hometown    = hometown_country %in% "United States" & !is.na(hometown_city)
+  )
+
+# Hometown communities, from the merged data: one row per matched place or county subdivision.
+# County-level matches (23 players, e.g. Tonopah, AZ -> Maricopa County) are left out of every
+# per-capita analysis because their values describe a whole county, not a town.
+communities = players |>
+  dplyr::filter(hometown_match_level %in% c("Place", "County subdivision"), hometown_population > 0) |>
+  dplyr::group_by(hometown_geoid, hometown_match_level) |>
+  dplyr::summarise(
+    community = paste0(dplyr::first(hometown_city), ", ", dplyr::first(hometown_state)),
+    players   = dplyr::n(),
+    dplyr::across(c(hometown_population, hometown_median_income, hometown_poverty_rate,
+                    hometown_bachelors_or_higher, hometown_population_density), dplyr::first),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(players_per_10k = players / hometown_population * 1e4)
+
+# For comparisons across communities, places with no FBS players must be included (rule 57).
+# They are not in the merged data, so they come from the Census table; player counts come from the merged data.
+places = census_clean |>
+  dplyr::filter(geography_level == "place", population > 0) |>
+  dplyr::left_join(dplyr::filter(communities, hometown_match_level == "Place") |> dplyr::select(hometown_geoid, players),
+                   by = c("geoid" = "hometown_geoid")) |>
+  dplyr::mutate(players = dplyr::coalesce(players, 0L),
+                players_per_10k = players / population * 1e4)
+
+theme_set_project = ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(panel.grid.minor = ggplot2::element_blank(), plot.title.position = "plot")
+```
+
+### Table 5: Dataset overview
+
+```{r table_overview}
+tibble::tribble(
+  ~measure,                                       ~value,
+  "Players (rows)",                               format(nrow(players), big.mark = ","),
+  "Columns",                                      as.character(ncol(fbs_players)),
+  "Schools / conferences",                        paste(dplyr::n_distinct(players$school), "/", dplyr::n_distinct(players$conference)),
+  "Players with 2026 CFBD stats",                 paste0(format(sum(!is.na(players$player_id)), big.mark = ","), " (",
+                                                         round(mean(!is.na(players$player_id)) * 100, 1), "%)"),
+  "Players with a U.S. hometown",                 format(sum(players$us_hometown), big.mark = ","),
+  "U.S. hometowns matched to Census data",        paste0(format(sum(players$us_hometown & !is.na(players$hometown_geoid)), big.mark = ","), " (",
+                                                         round(mean(!is.na(players$hometown_geoid[players$us_hometown])) * 100, 1), "%)"),
+  "  matched to a place",                         format(sum(players$hometown_match_level %in% "Place"), big.mark = ","),
+  "  matched to a county subdivision",            format(sum(players$hometown_match_level %in% "County subdivision"), big.mark = ","),
+  "  matched to a county",                        format(sum(players$hometown_match_level %in% "County"), big.mark = ","),
+  "Players from outside the U.S.",                format(sum(!players$hometown_country %in% c("United States", NA)), big.mark = ","),
+  "Distinct hometown communities (place or township)", format(nrow(communities), big.mark = ",")
+) |>
+  knitr::kable(col.names = c("Measure", "Value"))
+```
+
+### Table 6: Summary statistics for the main numeric variables
+
+Player measurements describe all rostered players. Hometown characteristics describe each player's matched hometown, so a town with many players counts once per player. Hometown characteristics use only town-level matches (places and county subdivisions): the 23 county-level matches describe a whole county rather than a town, so they are left out of hometown and per-capita summaries ("Missing" counts unmatched and county-level players). The largest case is Tonopah, AZ, whose zero-population Census place falls back to Maricopa County (4.6 million residents).
+
+```{r table_summary_stats}
+summary_vars = c(
+  "Height (inches)"                       = "height_in",
+  "Weight (pounds)"                       = "weight_lbs",
+  "Hometown population (persons)"         = "hometown_population",
+  "Hometown median household income ($)"  = "hometown_median_income",
+  "Hometown population density (per sq mi)" = "hometown_population_density",
+  "Hometown poverty rate (%)"             = "hometown_poverty_rate",
+  "Hometown bachelor's or higher (%)"     = "hometown_bachelors_or_higher",
+  "Hometown median age (years)"           = "hometown_median_age"
+)
+
+town_level = players$hometown_match_level %in% c("Place", "County subdivision")
+
+purrr::imap_dfr(summary_vars, function(col, label) {
+  x = players[[col]]
+  if (startsWith(col, "hometown_")) x = x[town_level]          # county-level matches excluded
+  tibble::tibble(variable = label, n = sum(!is.na(x)), missing = nrow(players) - sum(!is.na(x)),   # missing or excluded
+                 mean = mean(x, na.rm = TRUE), sd = stats::sd(x, na.rm = TRUE),
+                 min = min(x, na.rm = TRUE), median = stats::median(x, na.rm = TRUE), max = max(x, na.rm = TRUE))
+}) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","),
+               col.names = c("Variable", "N", "Missing", "Mean", "SD", "Min", "Median", "Max"))
+```
+
+### Table 7: Players by conference and position group
+
+```{r table_conference_position}
+players |>
+  dplyr::count(conference, position_group) |>
+  tidyr::pivot_wider(names_from = position_group, values_from = n, values_fill = 0) |>
+  dplyr::mutate(Total = rowSums(dplyr::across(-conference))) |>
+  dplyr::arrange(dplyr::desc(Total)) |>
+  dplyr::rename(Conference = conference) |>
+  knitr::kable()
+```
+
+### Chart 1: Data quality — missing values by column
+
+Share of players missing each roster and Census field. Stat columns are left out because a missing stat means the player recorded none in that category.
+
+```{r chart_missing, fig.width = 8, fig.height = 5}
+quality_cols = c("year", "height_in", "weight_lbs", "hometown_city", "hometown_state", "hometown_country",
+                 "player_id", "hometown_geoid", "hometown_median_income", "hometown_poverty_rate",
+                 "hometown_bachelors_or_higher", "hometown_county_geoid")
+
+tibble::tibble(column = quality_cols,
+               pct_missing = purrr::map_dbl(quality_cols, ~ mean(is.na(players[[.x]])) * 100)) |>
+  ggplot2::ggplot(ggplot2::aes(x = pct_missing, y = stats::reorder(column, pct_missing))) +
+  ggplot2::geom_col(fill = "#2b6cb0") +
+  ggplot2::geom_text(ggplot2::aes(label = paste0(round(pct_missing, 1), "%")), hjust = -0.15, size = 3.2) +
+  ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.12))) +
+  ggplot2::labs(title = "Missing values by column",
+                subtitle = "player_id is missing for players with no 2026 CFBD stats",
+                x = "Players missing the value (%)", y = NULL) +
+  theme_set_project
+```
+
+### Chart 2: Data quality — failed hometown joins by state
+
+Where the remaining failed hometown joins (rule 58) are concentrated: the 15 states with the most unmatched U.S. hometowns, labelled with the share of that state's players who are unmatched.
+
+```{r chart_unmatched_states, fig.width = 8, fig.height = 5}
+players |>
+  dplyr::filter(us_hometown, !is.na(hometown_state)) |>
+  dplyr::group_by(hometown_state) |>
+  dplyr::summarise(unmatched = sum(is.na(hometown_geoid)), pct_unmatched = mean(is.na(hometown_geoid)) * 100,
+                   .groups = "drop") |>
+  dplyr::slice_max(unmatched, n = 15, with_ties = FALSE) |>
+  ggplot2::ggplot(ggplot2::aes(x = unmatched, y = stats::reorder(hometown_state, unmatched))) +
+  ggplot2::geom_col(fill = "#c05621") +
+  ggplot2::geom_text(ggplot2::aes(label = paste0(unmatched, " (", round(pct_unmatched, 1), "%)")), hjust = -0.1, size = 3.2) +
+  ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.2))) +
+  ggplot2::labs(title = "Players whose U.S. hometown did not match Census data, by state",
+                subtitle = "Label: unmatched players (share of the state's players). Mostly unincorporated suburbs and neighborhoods.",
+                x = "Unmatched players", y = NULL) +
+  theme_set_project
+```
+
+### Chart 3: Height and weight by position group
+
+```{r chart_height_weight, fig.width = 9, fig.height = 5}
+players |>
+  dplyr::filter(!is.na(position_group)) |>
+  dplyr::select(position_group, `Height (inches)` = height_in, `Weight (pounds)` = weight_lbs) |>
+  tidyr::pivot_longer(-position_group, names_to = "measure", values_to = "value") |>
+  dplyr::filter(!is.na(value)) |>
+  ggplot2::ggplot(ggplot2::aes(x = value, y = position_group)) +
+  ggplot2::geom_boxplot(fill = "#bee3f8", outlier.size = 0.6, outlier.alpha = 0.5) +
+  ggplot2::facet_wrap(~ measure, scales = "free_x") +
+  ggplot2::labs(title = "Height and weight by position group",
+                subtitle = "Points fall beyond 1.5 x IQR within their group; the most extreme heights and weights were verified against the rosters",
+                x = NULL, y = NULL) +
+  theme_set_project
+```
+
+### Chart 4: FBS players per 100,000 residents by state
+
+Player counts come from the merged data: every U.S. player counts toward his hometown state, matched or not. State population is not in the merged data, so it is the sum of the state's ACS county populations from the Census table.
+
+```{r chart_state_rate, fig.width = 8, fig.height = 6}
+state_population = census_clean |>
+  dplyr::filter(geography_level == "county") |>
+  dplyr::group_by(state_abbr) |>
+  dplyr::summarise(population = sum(population, na.rm = TRUE), .groups = "drop")
+
+state_rates = players |>
+  dplyr::filter(us_hometown, !is.na(hometown_state)) |>
+  dplyr::count(state_abbr = as.character(hometown_state), name = "players") |>
+  dplyr::inner_join(state_population, by = "state_abbr") |>
+  dplyr::mutate(per_100k = players / population * 1e5)
+
+state_rates |>
+  dplyr::slice_max(per_100k, n = 20) |>
+  ggplot2::ggplot(ggplot2::aes(x = per_100k, y = stats::reorder(state_abbr, per_100k))) +
+  ggplot2::geom_col(fill = "#2f855a") +
+  ggplot2::geom_text(ggplot2::aes(label = round(per_100k, 1)), hjust = -0.2, size = 3.2) +
+  ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.1))) +
+  ggplot2::labs(title = "Top 20 states by FBS players per 100,000 residents",
+                x = "Players per 100,000 residents", y = NULL) +
+  theme_set_project
+```
+
+### Table 8: Communities producing the most FBS players per capita
+
+Matched hometown communities (places and townships) with at least 10,000 residents, ranked by players per 10,000 residents. All values come from the merged dataset. Smaller communities are left out because one or two players would give them extreme rates.
+
+```{r table_top_communities}
+communities |>
+  dplyr::filter(hometown_population >= 1e4) |>
+  dplyr::slice_max(players_per_10k, n = 15, with_ties = FALSE) |>
+  dplyr::transmute(Community = community, Level = hometown_match_level, Players = players,
+                   Population = hometown_population, `Players per 10k` = players_per_10k,
+                   `Median income ($)` = hometown_median_income, `Poverty rate (%)` = hometown_poverty_rate,
+                   `Bachelor's+ (%)` = hometown_bachelors_or_higher, `Density (per sq mi)` = hometown_population_density) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+
+### Chart 5: Community characteristics vs. players per capita
+
+Player counts come from the merged data. Census places with at least 10,000 residents (including places with no FBS players, which come from the Census table) are split into ten equal-sized groups (deciles) for each characteristic. Each point is the decile's combined rate: its total players divided by its total population. Density is shown as log10 (2 = 100, 3 = 1,000, 4 = 10,000 people per square mile).
+
+```{r chart_characteristics, fig.width = 10, fig.height = 7}
+characteristics = c(`Median household income ($)`       = "median_income",
+                    `Population density (log10 people per sq mi)` = "population_density",
+                    `Poverty rate (%)`                  = "poverty_rate",
+                    `Bachelor's or higher (%)`          = "bachelors_or_higher")
+
+purrr::imap_dfr(characteristics, function(col, label) {
+  places |>
+    dplyr::filter(population >= 1e4, !is.na(.data[[col]])) |>
+    dplyr::mutate(decile = dplyr::ntile(.data[[col]], 10)) |>
+    dplyr::group_by(decile) |>
+    dplyr::summarise(value = stats::median(.data[[col]]),
+                     players_per_10k = sum(players) / sum(population) * 1e4, .groups = "drop") |>
+    dplyr::mutate(value = if (col == "population_density") log10(value) else value,
+                  characteristic = label)
+}) |>
+  ggplot2::ggplot(ggplot2::aes(x = value, y = players_per_10k)) +
+  ggplot2::geom_line(colour = "#c05621", linewidth = 0.9) +
+  ggplot2::geom_point(colour = "#c05621", size = 2) +
+  ggplot2::facet_wrap(~ characteristic, scales = "free_x") +
+  ggplot2::scale_x_continuous(labels = scales::label_comma()) +
+  ggplot2::expand_limits(y = 0) +
+  ggplot2::labs(title = "FBS players per 10,000 residents across deciles of each community characteristic",
+                subtitle = "Census places with 10,000+ residents; x = median value of the decile",
+                x = NULL, y = "Players per 10,000 residents") +
+  theme_set_project
+```
+
+### Table 9: Correlation of community characteristics with players per capita
+
+Spearman rank correlations for Census places with at least 10,000 residents (including places with no players). Spearman is used because the rates are heavily skewed. University proximity is not available and thus removed from the scope of analysis.
+
+```{r table_correlations}
+community_10k = dplyr::filter(places, population >= 1e4)
+
+tibble::tibble(
+  characteristic = c("Median household income", "Population density", "Poverty rate",
+                     "Bachelor's or higher", "Population"),
+  column         = c("median_income", "population_density", "poverty_rate", "bachelors_or_higher", "population")
+) |>
+  dplyr::mutate(
+    test        = purrr::map(column, ~ suppressWarnings(stats::cor.test(community_10k$players_per_10k,
+                                                                         community_10k[[.x]], method = "spearman"))),
+    spearman_rho = purrr::map_dbl(test, ~ unname(.x$estimate)),
+    p_value      = purrr::map_dbl(test, "p.value"),
+    places       = purrr::map_int(column, ~ sum(!is.na(community_10k[[.x]])))
+  ) |>
+  dplyr::select(characteristic, places, spearman_rho, p_value) |>
+  dplyr::arrange(dplyr::desc(abs(spearman_rho))) |>
+  knitr::kable(digits = c(0, 0, 3, 4), col.names = c("Characteristic", "Places", "Spearman rho", "p-value"))
+```

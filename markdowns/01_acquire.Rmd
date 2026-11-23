@@ -647,9 +647,33 @@ if (nrow(suspicious) > 0) {
 print(dplyr::count(fbs_rosters, conference))
 ```
 
+### Roster checks for validation rules 60-61
+
+These checks investigate the roster issues flagged in `04_validate.Rmd`. Their output decides whether each issue is a scraping error (fix the parser) or a feature of the source (document it). Rule 63 was checked by hand: Colorado State and Delaware do not publish height or weight, and Georgia Tech does not publish class year, so those gaps come from the source sites, not the scraper. Rule 62 was also checked by hand: the Army (188), Navy (188) and Rutgers (134) roster counts match the schools' published rosters.
+
+```{r roster_checks, message=TRUE}
+# ---- Rules 60-61: the most extreme heights and weights ----------------------
+robust_z = function(x) {
+  s = stats::mad(x, na.rm = TRUE)
+  if (is.na(s) || s == 0) return(rep(0, length(x)))
+  (x - stats::median(x, na.rm = TRUE)) / s
+}
+
+fbs_rosters |>
+  dplyr::group_by(position) |>
+  dplyr::mutate(z_height = robust_z(height_in), z_weight = robust_z(weight_lbs)) |>
+  dplyr::ungroup() |>
+  dplyr::filter(abs(z_height) > 5 | abs(z_weight) > 5) |>
+  dplyr::left_join(dplyr::select(schools, school, url), by = "school") |>
+  dplyr::transmute(school, name, position, height, height_in, weight_lbs,
+                   z_height = round(z_height, 1), z_weight = round(z_weight, 1), url) |>
+  dplyr::arrange(dplyr::desc(pmax(abs(z_height), abs(z_weight), na.rm = TRUE))) |>
+  print(n = Inf)
+```
+
 ## Source 2: American Community Survey (API)
 
-What one row is: One U.S. Census geographic area (place or county), containing socioeconomic characteristics, geographic coordinates, and county-matching information where applicable.
+What one row is: One U.S. Census geographic area (place, county subdivision, or county), containing socioeconomic characteristics, geographic coordinates, and county-matching information where applicable.
 
 ```{r}
 # CENSUS DATA SETUP
@@ -821,6 +845,80 @@ census_counties |>
   )
 
 
+
+# NATIONWIDE COUNTY SUBDIVISION DATA (towns and townships)
+# Many states (e.g. NJ, PA, MI, New England) govern through towns and townships,
+# which the Census files as county subdivisions rather than places.
+
+census_cousubs <- purrr::map(
+  census_states,
+  function(st) {
+    message("Retrieving Census county subdivisions for: ", st)
+    tidycensus::get_acs(
+      geography = "county subdivision",
+      variables = census_variables,
+      state     = st,
+      year      = census_year,
+      survey    = "acs5",
+      output    = "wide"
+    ) |>
+      dplyr::mutate(state_abbr = st)
+  }
+) |>
+  dplyr::bind_rows() |>
+  add_census_rates()
+
+dim(census_cousubs)
+
+
+# COUNTY SUBDIVISION COORDINATES AND LAND AREA
+
+cousub_boundaries <- purrr::map(
+  census_states,
+  ~ tigris::county_subdivisions(state = .x, year = census_year, cb = TRUE) |>
+    dplyr::select(GEOID, ALAND)
+) |>
+  purrr::reduce(rbind) |>
+  dplyr::filter(GEOID %in% census_cousubs$GEOID)
+
+cousub_points <- cousub_boundaries |>
+  sf::st_transform(6933) |>
+  sf::st_point_on_surface() |>
+  sf::st_transform(4326)
+
+cousub_coords <- sf::st_coordinates(cousub_points)
+
+cousub_geography <- cousub_points |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(
+    GEOID,
+    longitude      = cousub_coords[, 1],
+    latitude       = cousub_coords[, 2],
+    land_area_sqmi = as.numeric(ALAND) / sqm_per_sqmi
+  )
+
+# A county subdivision lies inside one county: its GEOID starts with the county GEOID
+census_cousubs <- census_cousubs |>
+  dplyr::left_join(cousub_geography, by = "GEOID") |>
+  dplyr::mutate(
+    population_density  = dplyr::if_else(land_area_sqmi > 0, populationE / land_area_sqmi, NA_real_),
+    county_geoid        = substr(GEOID, 1, 5),
+    county_name         = census_counties$NAME[match(county_geoid, census_counties$GEOID)],
+    county_count        = 1L,
+    multiple_counties   = FALSE,
+    county_match_status = "Single-county match"
+  )
+
+census_cousubs |>
+  dplyr::summarise(
+    total_county_subdivisions = dplyr::n(),
+    missing_coordinates       = sum(is.na(longitude) | is.na(latitude)),
+    missing_density           = sum(is.na(population_density)),
+    missing_county            = sum(is.na(county_name)),
+    duplicate_geoids          = sum(duplicated(GEOID))
+  )
+
+
 # CITY-TO-COUNTY GEOGRAPHIC MATCHING
 
 city_boundaries <- place_boundaries |>
@@ -899,7 +997,9 @@ census_counties_final <- census_counties |>
   ) |>
   standardize("county")
 
-census_geography <- dplyr::bind_rows(census_places_final, census_counties_final)
+census_cousubs_final <- standardize(census_cousubs, "county subdivision")
+
+census_geography <- dplyr::bind_rows(census_places_final, census_cousubs_final, census_counties_final)
 
 # Validate: share of missing values per column, by geography level
 census_geography |>
@@ -960,16 +1060,7 @@ dplyr::glimpse(cfbd_player_stats)
 ```{r}
 raw_dir = "../data/raw"
 
-write.csv(fbs_rosters,
-          file.path(raw_dir, "fbs_rosters.csv"),
-          row.names = FALSE)
-
-write.csv(census_geography,
-          file.path(raw_dir, "census_geography_2024.csv"),
-          row.names = FALSE)
-
-write.csv(cfbd_player_stats,
-          file.path(raw_dir, "cfbd_player_stats.csv"),
-          row.names = FALSE)
+readr::write_csv(fbs_rosters,       file.path(raw_dir, "fbs_rosters.csv"),          na = "")
+readr::write_csv(census_geography,  file.path(raw_dir, "census_geography_2024.csv"), na = "")
+readr::write_csv(cfbd_player_stats, file.path(raw_dir, "cfbd_player_stats.csv"),     na = "")
 ```
-

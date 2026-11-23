@@ -12,14 +12,23 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ## Read the raw data
 ```{r}
-fbs_rosters <- readr::read_csv("../data/raw/fbs_rosters.csv")
-
-census_geography_2024 <- readr::read_csv("../data/raw/census_geography_2024.csv",
-                                         col_types = readr::cols(geoid = "c", county_geoid = "c", .default = readr::col_guess())
+# Explicit column types: faster than guessing, and IDs keep their leading zeros
+fbs_rosters <- readr::read_csv(
+  "../data/raw/fbs_rosters.csv",
+  col_types = readr::cols(height_in = "d", weight_lbs = "d", .default = "c")
 )
 
-cfbd_player_stats <- readr::read_csv("../data/raw/cfbd_player_stats.csv",
-                                     col_types = readr::cols(player_id = "c", .default = readr::col_guess())
+census_geography_2024 <- readr::read_csv(
+  "../data/raw/census_geography_2024.csv",
+  col_types = readr::cols(geography_level = "c", geoid = "c", name = "c", state_abbr = "c",
+                          county_geoid = "c", county_name = "c", county_match_status = "c",
+                          county_count = "i", multiple_counties = "l", .default = "d")
+)
+
+cfbd_player_stats <- readr::read_csv(
+  "../data/raw/cfbd_player_stats.csv",
+  col_types = readr::cols(season = "i", player_id = "c", school = "c", conference = "c",
+                          name = "c", position = "c", .default = "d")
 )
 ```
 
@@ -170,17 +179,20 @@ clean_year = function(x) {
 }
 
 # Position -> spelled out; multi-position values keep every position ("WR/CB" -> "Wide Receiver/Cornerback")
+# Each distinct value is mapped once and the result matched back (much faster than row by row)
 clean_position = function(x) {
   x = stringr::str_squish(x)
   x = dplyr::if_else(stringr::str_detect(x, "^[A-Z]+( [A-Z]+)+$"),           # "CB S" -> "CB/S"
                      stringr::str_replace_all(x, " ", "/"), x)
-  purrr::map_chr(stringr::str_split(x, "\\s*/\\s*"), function(parts) {
+  u = unique(x)
+  mapped = purrr::map_chr(stringr::str_split(u, "\\s*/\\s*"), function(parts) {
     if (all(is.na(parts))) return(NA_character_)
     full = unname(position_lookup[stringr::str_to_upper(parts)])
     if (any(is.na(full))) return(NA_character_)                               # unmapped -> NA (reported below)
-    if (setequal(full, c("Kicker", "Punter"))) return("Kicker/Punter")    # P/K, K/P, PK/P -> one label
+    if (setequal(full, c("Kicker", "Punter"))) return("Kicker/Punter")        # P/K, K/P, PK/P -> one label
     paste(unique(full), collapse = "/")
   })
+  mapped[match(x, u)]
 }
 
 # ============================================================================
@@ -279,55 +291,83 @@ message("Unrecognized hometowns: ",
 ### Source 2
 
 ```{r}
-# ---- Place-name cleaning ------------------------------------------------------
-# Census place names look like "Abbeville city, Alabama". The city name, the
-# place type, and the state are three variables, so they are split apart.
+# ---- Name cleaning ------------------------------------------------------------
+# Census names combine several variables:
+#   place:              "Abbeville city, Alabama"
+#   county subdivision: "Willingboro township, Burlington County, New Jersey"
+# The name, the geography type, the county and the state are split apart
+# (county and state are already stored in county_name and state_abbr).
 place_types = c("city and borough", "unified government", "consolidated government",
                 "metropolitan government", "metro government", "metro township", "urban county",
                 "zona urbana", "comunidad", "municipality", "corporation",
                 "borough", "village", "town", "city", "CDP")
+cousub_types = c("charter township", "census subarea", "not defined", "barrio-pueblo", "township",
+                 "barrio", "plantation", "borough", "village", "town", "city", "CCD", "UT",
+                 "precinct", "district", "grant", "gore", "location", "purchase")
+# Statistical areas drawn by the Census Bureau, not real towns: census county divisions (CCD),
+# Alaska census subareas, unorganized territories (UT) and "County subdivisions not defined"
+statistical_types  = c("CCD", "census subarea", "UT", "not defined")
 consolidated_types = c("unified government", "consolidated government", "metropolitan government",
                        "metro government", "urban county")
-type_pattern = paste0("\\s(", paste(place_types, collapse = "|"), ")$")
+
+type_regex     = function(types) paste0("\\s(", paste(types, collapse = "|"), ")$")
+place_pattern  = type_regex(place_types)
+cousub_pattern = type_regex(cousub_types)
 
 census_clean = census_geography_2024 |>
   dplyr::mutate(
-    # 1. Drop the state ("Abbeville city, Alabama" -> "Abbeville city"); state is already in state_abbr
-    name = stringr::str_remove(name, ",\\s*[^,]+$"),
+    is_place  = geography_level == "place",
+    is_cousub = geography_level == "county subdivision",
 
-    # 2. Places only: drop county disambiguation, e.g. "Mount Olive CDP (Coosa County)" -> "Mount Olive CDP"
-    name = dplyr::if_else(geography_level == "place",
-                          stringr::str_remove(name, "\\s*\\((?!balance)[^)]*\\)$"), name),
-    balance = geography_level == "place" & stringr::str_detect(name, "\\(balance\\)"),
+    # 1. Drop the state from every name; county subdivisions also drop the county
+    name = stringr::str_remove(name, ",\\s*[^,]+$"),
+    name = dplyr::if_else(is_cousub, stringr::str_remove(name, ",\\s*[^,]+$"), name),
+
+    # 2. Drop disambiguation in parentheses
+    #    places:              "Mount Olive CDP (Coosa County)" -> "Mount Olive CDP"
+    #    county subdivisions: "Washington township (81242)"   -> "Washington township"
+    name = dplyr::case_when(
+      is_place  ~ stringr::str_remove(name, "\\s*\\((?!balance)[^)]*\\)$"),
+      is_cousub ~ stringr::str_squish(stringr::str_remove_all(name, "\\s*\\([^)]*\\)")),
+      TRUE      ~ name
+    ),
+    balance = is_place & stringr::str_detect(name, "\\(balance\\)"),
     name    = stringr::str_remove(name, "\\s*\\(balance\\)$"),
 
-    # 3. Split off the place type ("Abbeville city" -> name "Abbeville", place_type "city")
-    place_type = dplyr::if_else(geography_level == "place",
-                                stringr::str_match(name, type_pattern)[, 2], NA_character_),
-    name = dplyr::if_else(!is.na(place_type), stringr::str_remove(name, type_pattern), name),
+    # 3. Split off the geography type ("Abbeville city" -> "Abbeville" + "city";
+    #    "Willingboro township" -> "Willingboro" + "township")
+    place_type = dplyr::case_when(
+      is_place  ~ stringr::str_match(name, place_pattern)[, 2],
+      is_cousub ~ stringr::str_match(name, cousub_pattern)[, 2]
+    ),
+    name = dplyr::case_when(
+      is_place  ~ stringr::str_remove(name, place_pattern),
+      is_cousub ~ stringr::str_remove(name, cousub_pattern),
+      TRUE      ~ name
+    ),
+    is_statistical_area = is_cousub & place_type %in% statistical_types,
 
     # 4. Consolidated city-counties -> the city ("Louisville/Jefferson County" -> "Louisville",
     #    "Nashville-Davidson" -> "Nashville"). Real hyphenated cities (Winston-Salem) are untouched.
-    consolidated = geography_level == "place" &
+    consolidated = is_place &
       (place_type %in% consolidated_types |
          (is.na(place_type) & (balance | stringr::str_detect(name, "[-/].*County$")))),
     name = dplyr::if_else(consolidated, stringr::str_remove(name, "[-/].*$"), name),
 
     # 5. Census writes "Legal name (common name)"; keep the common name
     #    ("San Buenaventura (Ventura)" -> "Ventura", "El Paso de Robles (Paso Robles)" -> "Paso Robles")
-    name = dplyr::if_else(geography_level == "place" & stringr::str_detect(name, "\\([^)]+\\)$"),
+    name = dplyr::if_else(is_place & stringr::str_detect(name, "\\([^)]+\\)$"),
                           stringr::str_match(name, "\\(([^)]+)\\)$")[, 2], name),
 
     # 6. Two large cities whose Census names differ from everyday usage
     name = dplyr::case_when(
-      geography_level == "place" & name == "Urban Honolulu"                    ~ "Honolulu",
-      geography_level == "place" & name == "Boise City" & state_abbr == "ID"   ~ "Boise",
+      is_place & name == "Urban Honolulu"                    ~ "Honolulu",
+      is_place & name == "Boise City" & state_abbr == "ID"   ~ "Boise",
       TRUE ~ stringr::str_squish(name)
     )
   )
 
 # ---- County names: one consistent format ("Chambers County") for every row --------
-# County rows now hold "Autauga County"; place rows held only "Chambers" from the boundary file.
 county_names = census_clean |>
   dplyr::filter(geography_level == "county") |>
   dplyr::select(county_geoid = geoid, county_name_clean = name)
@@ -349,23 +389,18 @@ census_clean = census_clean |>
       median_income == 250001 ~ 250000,
       TRUE ~ median_income
     ),
-    median_age = dplyr::na_if(median_age, 0),                     # one place reported a median age of 0
-
-    # ---- Requested rounding: race/ethnicity percentages to 4 decimal places ----
-    dplyr::across(c(pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race), ~ round(.x, 4)),
+    median_age = dplyr::na_if(median_age, 0),                     # median age of 0 = no residents
 
     # ---- Types ----
-    geography_level        = factor(geography_level, levels = c("place", "county")),
+    geography_level        = factor(geography_level, levels = c("place", "county subdivision", "county")),
     place_type             = factor(place_type),
     state_abbr             = factor(state_abbr),
     county_match_status    = factor(county_match_status),
     median_income_censored = factor(median_income_censored),
-    population             = as.integer(population),          # whole people
-    county_count           = as.integer(county_count),
-    multiple_counties      = as.logical(multiple_counties)
+    population             = as.integer(population)           # whole people
   ) |>
   dplyr::select(
-    geography_level, geoid, name, place_type, state_abbr,
+    geography_level, geoid, name, place_type, is_statistical_area, state_abbr,
     population, median_age, pct_male,
     pct_white, pct_black, pct_asian, pct_hispanic, pct_other_race,
     median_income, median_income_censored, poverty_rate, bachelors_or_higher,
@@ -374,12 +409,20 @@ census_clean = census_clean |>
   )
 
 # ---- Checks ---------------------------------------------------------------------
+cousubs = dplyr::filter(census_clean, geography_level == "county subdivision")
+
 message("Rows: ", nrow(census_clean), " (", paste(names(table(census_clean$geography_level)),
         table(census_clean$geography_level), collapse = ", "), ")")
 message("Duplicate GEOIDs: ", sum(duplicated(census_clean[c("geography_level", "geoid")])))
 message("Place names still containing a type, state, or parenthesis: ",
         sum(census_clean$geography_level == "place" &
-              stringr::str_detect(census_clean$name, paste0(type_pattern, "|,|\\("))))
+              stringr::str_detect(census_clean$name, paste0(place_pattern, "|,|\\("))))
+message("County subdivisions: ", nrow(cousubs), " (", sum(cousubs$is_statistical_area), " statistical areas, ",
+        sum(!cousubs$is_statistical_area), " towns/townships)")
+message("County subdivision GEOIDs not 10 digits: ", sum(!stringr::str_detect(cousubs$geoid, "^\\d{10}$")),
+        " | not inside a known county: ", sum(!cousubs$county_geoid %in% county_names$county_geoid))
+message("County subdivisions with no type: ", sum(is.na(cousubs$place_type)),
+        " | with no coordinates: ", sum(is.na(cousubs$longitude)))
 message("Race shares that don't sum to ~100: ",
         sum(abs(rowSums(dplyr::select(census_clean, pct_white:pct_other_race)) - 100) > 0.01, na.rm = TRUE))
 ```
@@ -508,15 +551,7 @@ message("Percent columns outside 0-100: ",
 processed_dir = "../data/processed"
 
 
-write.csv(fbs_rosters_clean, 
-          file.path(processed_dir, "fbs_rosters_clean.csv"), 
-          row.names = FALSE)
-
-write.csv(census_clean,
-          file.path(processed_dir, "census_geography_2024_clean.csv"),
-          row.names = FALSE)
-
-write.csv(player_stats_clean,
-          file.path(processed_dir, "player_stats_clean.csv"),
-          row.names = FALSE)
+readr::write_csv(fbs_rosters_clean,  file.path(processed_dir, "fbs_rosters_clean.csv"),            na = "")
+readr::write_csv(census_clean,       file.path(processed_dir, "census_geography_2024_clean.csv"),  na = "")
+readr::write_csv(player_stats_clean, file.path(processed_dir, "player_stats_clean.csv"),           na = "")
 ```

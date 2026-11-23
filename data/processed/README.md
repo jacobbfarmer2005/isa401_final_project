@@ -10,7 +10,7 @@ Cleaned and merged files written by markdowns/02 to 04.
 | year | factor | Eligibility year, 1–8; redshirt status ignored (R-Fr. = 1); NA = not listed |
 | position | factor | Position, spelled out (e.g., Wide Receiver); multiple positions separated by "/" |
 | player_id | character | collegefootballdata.com (CFBD) player ID; NA = no matching 2026 stats |
-| match_method | factor | How the roster player was matched to CFBD stats: "Exact name" or "First initial + last name"; NA = not matched |
+| match_method | factor | How the roster player was matched to CFBD stats: "Exact name", "First initial + last name" or "Similar name" (near-identical spelling, extra surname, or nickname within the same school); NA = not matched |
 | season | integer | Season of the CFBD statistics (2026); NA = not matched |
 | height_in | numeric | Player height in inches |
 | weight_lbs | integer | Player weight in pounds |
@@ -20,6 +20,7 @@ Cleaned and merged files written by markdowns/02 to 04.
 | previous_school_1 | character | Most recently listed previous college (transfers); NA = none |
 | previous_school_2 | character | Second listed previous college; NA = none |
 | previous_school_3 | character | Third listed previous college; NA = none |
+| previous_school_4 | character | Fourth listed previous college; NA = none (14 players in 2026). Previous-school columns are kept only when at least one player has a value, so the number of these columns can change between seasons |
 | receiving_longest_yards | integer | Longest reception of the season, in yards |
 | receptions | integer | Total receptions (count) |
 | receiving_touchdowns | integer | Receiving touchdowns (count) |
@@ -74,9 +75,10 @@ Cleaned and merged files written by markdowns/02 to 04.
 | fumbles | integer | Fumbles (count) |
 | fumbles_lost | integer | Fumbles lost to the opponent (count) |
 | fumbles_recovered | integer | Fumbles recovered (count) |
-| hometown_geoid | character | 7-digit Census place FIPS code of the hometown (state + place); NA = no Census match or non-US |
-| hometown_place_type | factor | Census place type (city, town, village, borough, CDP, etc.) |
-| hometown_population | integer | Total population of the hometown, ACS 2024 5-year (persons) |
+| hometown_geoid | character | Census FIPS code of the hometown geography: 7 digits for a place (state + place), 10 for a county subdivision (state + county + subdivision), 5 for a county (state + county); NA = no Census match or non-US |
+| hometown_match_level | factor | Census geography the hometown was matched to: "Place" (city or Census-designated place), "County subdivision" (town or township) or "County" (roster listed a county, or the matched place had no residents). All hometown_ columns describe this geography; NA = no Census match or non-US |
+| hometown_place_type | factor | Census place or county subdivision type (city, town, village, borough, CDP, township, charter township, etc.); NA for county-level matches |
+| hometown_population | integer | Total population of the hometown geography, ACS 2024 5-year (persons); the whole county for county-level matches |
 | hometown_median_age | numeric | Median age of hometown residents, ACS 2024 5-year (years) |
 | hometown_pct_male | numeric | Percent of hometown residents who are male (percent, 0–100) |
 | hometown_pct_white | numeric | Percent of hometown residents who are non-Hispanic white (percent, 0–100) |
@@ -88,9 +90,9 @@ Cleaned and merged files written by markdowns/02 to 04.
 | hometown_median_income_censored | factor | Flags incomes at the ACS limit: "Bottom-coded (under $2,500)" or "Top-coded (over $250,000)"; NA = not censored |
 | hometown_poverty_rate | numeric | Percent of hometown residents below the poverty line (percent, 0–100) |
 | hometown_bachelors_or_higher | numeric | Percent of hometown residents 25+ with a bachelor's degree or higher (percent, 0–100) |
-| hometown_longitude | numeric | Longitude of a point inside the hometown place (decimal degrees) |
-| hometown_latitude | numeric | Latitude of a point inside the hometown place (decimal degrees) |
-| hometown_land_area_sqmi | numeric | Land area of the hometown place (square miles) |
+| hometown_longitude | numeric | Longitude of a point inside the hometown geography (decimal degrees) |
+| hometown_latitude | numeric | Latitude of a point inside the hometown geography (decimal degrees) |
+| hometown_land_area_sqmi | numeric | Land area of the hometown geography (square miles); the whole county for county-level matches |
 | hometown_population_density | numeric | Hometown population ÷ land area (persons per square mile) |
 | hometown_county_geoid | character | 5-digit FIPS code of the county containing the hometown (state + county) |
 | hometown_county_name | character | Name of the county containing the hometown (e.g., Baldwin County) |

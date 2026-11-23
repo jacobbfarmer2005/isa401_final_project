@@ -1,65 +1,65 @@
-rule,category,level,description,columns,rows_flagged,detail,result
-1,Data type,Table,Each column has its expected R type,NA,NA,1 column(s) with the wrong type,Fail
-2,Presence,Row,"school, conference, name and position are never missing",school; conference; name; position,0,NA,Pass
-3,Range,Row,height_in is between 60 and 95,height_in,0,NA,Pass
-4,Range,Row,weight_lbs is between 100 and 5000,weight_lbs,0,NA,Pass
-5,Range,Row,season is 2026,season,0,NA,Pass
-6,Range,Row,Percentage columns are between 0 and 100,hometown_pct_male; hometown_pct_white; hometown_pct_black; hometown_pct_asian; hometown_pct_hispanic; hometown_pct_other_race; hometown_poverty_rate; hometown_bachelors_or_higher; hometown_county_poverty_rate; hometown_county_bachelors_or_higher; completion_percent; field_goal_percent,0,NA,Pass
-7,Range,Row,"Median incomes are between $2,500 and $250,000",hometown_median_income; hometown_county_median_income,0,NA,Pass
-8,Range,Row,hometown_median_age is between 10 and 100,hometown_median_age,0,NA,Pass
-9,Range,Row,"Populations, land areas and densities are non-negative and below realistic maximums",hometown_population; hometown_land_area_sqmi; hometown_population_density; hometown_county_population; hometown_county_population_density,0,NA,Pass
-10,Range,Row,Latitude 17 to 72 and longitude -180 to -64,hometown_longitude; hometown_latitude,0,NA,Pass
-11,Range,Row,Stat counts non-negative and below season maximums; yardage at least -500,receptions; receiving_touchdowns; receiving_yards; receiving_yards_per_reception; rushing_carries; rushing_touchdowns; rushing_yards; rushing_yards_per_carry; passes_defended; qb_hurries; sacks; tackles_solo; defensive_touchdowns; tackles_for_loss; tackles_total; interceptions_yards_per_return; interceptions; interceptions_touchdowns; interceptions_yards; punt_returns_yards_per_return; punt_returns; punt_returns_touchdowns; punt_returns_yards; passing_attempts; passing_completions; passing_interceptions; passing_touchdowns; passing_yards; passing_yards_per_attempt; field_goals_attempted; field_goals_made; kicking_points; extra_points_attempted; extra_points_made; punts_inside_20; punts; punting_touchbacks; punting_yards; punting_yards_per_punt; kick_returns_yards_per_return; kick_returns; kick_returns_touchdowns; kick_returns_yards; fumbles; fumbles_lost; fumbles_recovered,0,NA,Pass
-12,Range,Row,Longest plays at most 100 yards; longest field goal at most 75,receiving_longest_yards; rushing_longest_yards; punt_returns_longest_yards; field_goal_longest_yards; punting_longest_yards; kick_returns_longest_yards,0,NA,Pass
-13,Code,Row,conference is one of the 11 FBS conferences,conference,0,NA,Pass
-14,Code,Row,year is 1-8,year,0,NA,Pass
-15,Code,Row,Every listed position is a recognized spelled-out position,position,0,NA,Pass
-16,Code,Row,US hometown_state is a valid USPS code,hometown_state,0,NA,Pass
-17,Code,Row,hometown_country is an ISO 3166 country (or UK constituent country),hometown_country,0,NA,Pass
-18,Code,Row,hometown_geoid is 7 digits and starts with the hometown state's FIPS code,"hometown_geoid, hometown_state",0,NA,Pass
-19,Code,Row,hometown_county_geoid is 5 digits and in the same state as the place,"hometown_county_geoid, hometown_geoid",0,NA,Pass
-20,Code,Row,player_id contains digits only,player_id,0,NA,Pass
-21,Code,Row,match_method is a defined method,match_method,0,NA,Pass
-22,Code,Row,hometown_place_type is a valid Census place type,hometown_place_type,0,NA,Pass
-23,Code,Row,hometown_median_income_censored is a defined level,hometown_median_income_censored,0,NA,Pass
-24,Foreign key,Row,player_id exists in player_stats_clean,player_id,0,NA,Pass
-25,Foreign key,Row,hometown_geoid exists as a Census place,hometown_geoid,0,NA,Pass
-26,Foreign key,Row,hometown_county_geoid exists as a Census county,hometown_county_geoid,0,NA,Pass
-27,Consistency,Row,Completions <= attempts,"passing_completions, passing_attempts",0,NA,Pass
-28,Consistency,Row,Field goals made <= attempted,"field_goals_made, field_goals_attempted",0,NA,Pass
-29,Consistency,Row,Extra points made <= attempted,"extra_points_made, extra_points_attempted",0,NA,Pass
-30,Consistency,Row,Fumbles lost <= fumbles,"fumbles_lost, fumbles",0,NA,Pass
-31,Consistency,Row,Solo tackles <= total tackles,"tackles_solo, tackles_total",0,NA,Pass
-32,Consistency,Row,Rushing touchdowns <= carries (laterals/fumble recoveries may break this),"rushing_touchdowns, rushing_carries",2,NA,Fail
-33,Consistency,Row,Receiving touchdowns <= receptions,"receiving_touchdowns, receptions",0,NA,Pass
-34,Consistency,Row,Completion % = completions / attempts x 100 (within 1 point),"completion_percent, passing_completions, passing_attempts",0,NA,Pass
-35,Consistency,Row,Kicking points = 3 x field goals made + extra points made,"kicking_points, field_goals_made, extra_points_made",0,NA,Pass
-36,Consistency,Row,Yards per carry = yards / carries (within 0.15),"rushing_yards_per_carry, rushing_yards, rushing_carries",0,NA,Pass
-37,Consistency,Row,match_method is filled exactly when player_id is,"match_method, player_id",0,NA,Pass
-38,Consistency,Row,Each school belongs to exactly one conference,"school, conference",0,NA,Pass
-39,Consistency,Row,Race/ethnicity shares sum to 100% (within 0.01),"hometown_pct_white, hometown_pct_black, hometown_pct_asian, hometown_pct_hispanic, hometown_pct_other_race",0,NA,Pass
-40,Consistency,Row,"Censoring flag is set exactly when income is at $2,500 or $250,000","hometown_median_income_censored, hometown_median_income",0,NA,Pass
-41,Uniqueness,Row,Each player_id appears at most once,player_id,0,NA,Pass
-42,Uniqueness,Row,No player appears twice (school + name + position + hometown city),"school, name, position, hometown_city",0,NA,Pass
-43,Uniqueness,Table,All 139 FBS schools are present,NA,NA,139 schools,Pass
-44,Uniqueness,Table,All 11 FBS conferences are present,NA,NA,11 conferences,Pass
-45,Uniqueness,Row,"Only players: no coaches/staff, Team IMPACT members, memorial entries or honorary captains","name, position",0,NA,Pass
-46,Business rule,Table,API keys are stored in .Renviron in the project root,NA,NA,C:/Users/jacob/OneDrive/Documents/isa401/isa401_final_project/.Renviron,Pass
-47,Business rule,Table,.Renviron defines CFBD_API_KEY and CENSUS_API_KEY,NA,NA,Key names checked; values not printed,Pass
-48,Business rule,Table,No API key is hard-coded in any .Rmd file,NA,NA,19 .Rmd files scanned,Pass
-49,Business rule,Table,.Renviron is listed in .gitignore,NA,NA,.gitignore checked,Pass
-50,Business rule,Row,"Tidy: one row per player, no duplicate rows","school, name, position, hometown_city",0,NA,Pass
-51,Business rule,Table,Tidy: each variable forms one column (exceptions flagged),NA,NA,previous_school_1-4 is a repeating group (kept wide on purpose); multi-position cells flagged under rule 52,Fail
-52,Business rule,Row,Tidy: each cell holds a single value,position,88,NA,Fail
-53,Business rule,Table,"Technically correct: snake_case, descriptive column names",NA,NA,96 column names checked,Pass
-54,Business rule,Table,Technically correct: every column has its expected type (rule 1),NA,NA,Same test as rule 1,Fail
-55,Business rule,Table,Dataset holds every variable the research question needs,NA,NA,Missing: university_proximity,Fail
-56,Business rule,Row,Per-capita rates only for hometowns with population above 0,hometown_population,2,NA,Fail
-57,Business rule,Table,Per-capita analysis includes communities with zero players,NA,NA,28961 of 32330 Census places kept with 0 players,Pass
-58,Business rule,Row,Failed join: US hometown did not match a Census place,"hometown_city, hometown_state, hometown_geoid",780,NA,Fail
-59,Business rule,Table,Failed join: CFBD player did not match a roster player,NA,NA,120 of 8562 CFBD players unmatched,Fail
-60,Probabilistic,Row,Weight more than 3.5 robust SDs from the position median,weight_lbs,88,NA,Fail
-61,Probabilistic,Row,Height more than 3.5 robust SDs from the position median,height_in,14,NA,Fail
-62,Probabilistic,Table,School roster size outside the IQR fences,NA,NA,Army 188; Navy 188; Rutgers 134,Fail
-63,Probabilistic,Table,School missing rate far above the overall rate (binomial z > 3),NA,NA,Georgia Tech (year); Colorado State (height_in); Delaware (height_in); Colorado State (weight_lbs); Delaware (weight_lbs); Liberty (hometown_city); Mississippi State (hometown_city); Nevada (hometown_city); New Mexico (hometown_city); Northwestern (hometown_city); USF (hometown_city),Fail
-64,Probabilistic,Table,Census-matched and unmatched players have similar height/weight (KS p > 0.01),NA,NA,"height_in: D = 0.058, p = 0.016; weight_lbs: D = 0.078, p = 0.00028",Fail
+rule,category,check_type,level,description,violations,rows_flagged,result
+1,Data type,Wrong data type,Table,Each column has its expected R type,0,0,Pass
+2,Presence,Missing required value,Row,"school, conference, name and position are never missing",0,0,Pass
+3,Range,Impossible value,Row,height_in is between 60 and 95,0,0,Pass
+4,Range,Impossible value,Row,weight_lbs is between 100 and 5000,0,0,Pass
+5,Range,Impossible value,Row,season is 2026,0,0,Pass
+6,Range,Impossible value,Row,Percentage columns are between 0 and 100,0,0,Pass
+7,Range,Impossible value,Row,"Median incomes are between $2,500 and $250,000",0,0,Pass
+8,Range,Impossible value,Row,hometown_median_age is between 10 and 100,0,0,Pass
+9,Range,Impossible value,Row,"Populations, land areas and densities are non-negative and below realistic maximums",0,0,Pass
+10,Range,Impossible value,Row,Latitude 17 to 72 and longitude -180 to -64,0,0,Pass
+11,Range,Impossible value,Row,Stat counts non-negative and below season maximums; yardage at least -500,0,0,Pass
+12,Range,Impossible value,Row,Longest plays at most 100 yards; longest field goal at most 75,0,0,Pass
+13,Code,Invalid category,Row,conference is one of the 11 FBS conferences,0,0,Pass
+14,Code,Invalid category,Row,year is 1-8,0,0,Pass
+15,Code,Invalid category,Row,Every listed position is a recognized spelled-out position,0,0,Pass
+16,Code,Invalid category,Row,US hometown_state is a valid USPS code,0,0,Pass
+17,Code,Invalid category,Row,hometown_country is an ISO 3166 country (or UK constituent country),0,0,Pass
+18,Code,Invalid category,Row,hometown_geoid length matches its match level (7/10/5) and starts with the state FIPS code,0,0,Pass
+19,Code,Invalid category,Row,hometown_county_geoid is 5 digits and in the same state as the hometown,0,0,Pass
+20,Code,Invalid category,Row,player_id contains digits only,0,0,Pass
+21,Code,Invalid category,Row,match_method is a defined method,0,0,Pass
+22,Code,Invalid category,Row,hometown_place_type is a valid Census place or county subdivision type,0,0,Pass
+23,Code,Invalid category,Row,hometown_median_income_censored is a defined level,0,0,Pass
+24,Foreign key,Failed join,Row,player_id exists in player_stats_clean,0,0,Pass
+25,Foreign key,Failed join,Row,hometown_geoid exists at its match level in the Census data,0,0,Pass
+26,Foreign key,Failed join,Row,hometown_county_geoid exists as a Census county,0,0,Pass
+27,Consistency,Inconsistent values,Row,Completions <= attempts,0,0,Pass
+28,Consistency,Inconsistent values,Row,Field goals made <= attempted,0,0,Pass
+29,Consistency,Inconsistent values,Row,Extra points made <= attempted,0,0,Pass
+30,Consistency,Inconsistent values,Row,Fumbles lost <= fumbles,0,0,Pass
+31,Consistency,Inconsistent values,Row,Solo tackles <= total tackles,0,0,Pass
+32,Consistency,Inconsistent values,Row,Rushing touchdowns <= carries (laterals/fumble recoveries may break this),2,2,Fail
+33,Consistency,Inconsistent values,Row,Receiving touchdowns <= receptions,0,0,Pass
+34,Consistency,Inconsistent values,Row,Completion % = completions / attempts x 100 (within 1 point),0,0,Pass
+35,Consistency,Inconsistent values,Row,Kicking points = 3 x field goals made + extra points made,0,0,Pass
+36,Consistency,Inconsistent values,Row,Yards per carry = yards / carries (within 0.15),0,0,Pass
+37,Consistency,Inconsistent values,Row,match_method is filled exactly when player_id is,0,0,Pass
+38,Consistency,Inconsistent values,Row,Each school belongs to exactly one conference,0,0,Pass
+39,Consistency,Inconsistent values,Row,Race/ethnicity shares sum to 100% (within 0.01),0,0,Pass
+40,Consistency,Inconsistent values,Row,"Censoring flag is set exactly when income is at $2,500 or $250,000",0,0,Pass
+41,Uniqueness,Duplicate entry,Row,Each player_id appears at most once,0,0,Pass
+42,Uniqueness,Duplicate entry,Row,No player appears twice (school + name + position + hometown city),0,0,Pass
+43,Uniqueness,Missing group,Table,All 139 FBS schools are present,0,0,Pass
+44,Uniqueness,Missing group,Table,All 11 FBS conferences are present,0,0,Pass
+45,Uniqueness,Non-player entry,Row,"Only players: no coaches/staff, Team IMPACT members, memorial entries or honorary captains",0,0,Pass
+46,Business rule,Business rule,Table,API keys are stored in .Renviron in the project root,0,0,Pass
+47,Business rule,Business rule,Table,.Renviron defines CFBD_API_KEY and CENSUS_API_KEY,0,0,Pass
+48,Business rule,Business rule,Table,No API key is hard-coded in any .Rmd file,0,0,Pass
+49,Business rule,Business rule,Table,.Renviron is listed in .gitignore,0,0,Pass
+50,Business rule,Duplicate entry,Row,"Tidy: one row per player, no duplicate rows",0,0,Pass
+51,Business rule,Business rule,Table,Tidy: each variable forms one column (exceptions flagged),1,0,Fail
+52,Business rule,Multiple values in one cell,Row,Tidy: each cell holds a single value,88,88,Fail
+53,Business rule,Business rule,Table,"Technically correct: snake_case, descriptive column names",0,0,Pass
+54,Business rule,Wrong data type,Table,Technically correct: every column has its expected type (rule 1),0,0,Pass
+55,Business rule,Business rule,Table,Dataset holds every variable the research question needs,0,0,Pass
+56,Business rule,Zero population,Row,Per-capita rates only for hometowns with population above 0,0,0,Pass
+57,Business rule,Business rule,Table,Per-capita analysis includes communities with zero players,0,0,Pass
+58,Business rule,Failed join,Row,Failed join: US hometown did not match a Census geography,468,468,Fail
+59,Business rule,Failed join,Group,Failed join: CFBD player did not match a roster player,87,0,Fail
+60,Probabilistic,Statistical outlier,Row,Weight more than 3.5 robust SDs from the position median,88,88,Fail
+61,Probabilistic,Statistical outlier,Row,Height more than 3.5 robust SDs from the position median,14,14,Fail
+62,Probabilistic,Statistical outlier,Group,School roster size outside the IQR fences,3,0,Fail
+63,Probabilistic,Statistical outlier,Group,School missing rate far above the overall rate (binomial z > 3),11,0,Fail
+64,Probabilistic,Statistical outlier,Table,Census-matched and unmatched players have similar height/weight (KS p > 0.01),1,0,Fail
