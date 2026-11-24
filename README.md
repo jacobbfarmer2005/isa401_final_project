@@ -78,7 +78,7 @@ Run this setup chunk in your console to install this project's packages:
    - `04_validate_before_fixes.html`
    - `04_validate_after_fixes.html` Table 4 (before vs. after the fixes) compares against `data/processed/validation/baseline/`, which holds the original validation run.
 
-Rosters change during the season, so a fresh scrape may give slightly different counts than those reported in this README.
+Rosters change during the season, so a fresh scrape may give slightly different counts or differing values than those reported in this README.
 
 ## The Final Dataset
 
