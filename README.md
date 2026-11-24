@@ -84,7 +84,7 @@ Rosters change during the season, so a fresh scrape may give slightly different 
 
 - File: `data/processed/fbs_players_merged.csv`
 - One row is: one player and his associated conference, school, player statistics, and hometown demographics.
-- Rows and columns: 97 columns, 15,745 rows
+- Rows and columns: 15,744 rows × 97 columns
 
 | Column | Type | Description | Source |
 |---|---|---|---|
