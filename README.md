@@ -7,7 +7,7 @@ ISA 401 Final Project, Fall 2026, Team 6, Section B
 | Item | Link |
 |---|---|
 | Dashboard (Tableau Public or Power BI) | [link] |
-| Recorded technical presentation (YouTube, unlisted) | [link] |
+| Recorded technical presentation (YouTube, unlisted) | https://youtu.be/YiuSacWfJGo |
 | This repository | https://github.com/jacobbfarmer2005/isa401_final_project |
 
 ## Team
