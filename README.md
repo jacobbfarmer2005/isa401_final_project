@@ -14,7 +14,7 @@ ISA 401 Final Project, Fall 2026, Team 6, Section B
 
 | Member | What I built | Portfolio project entry |
 |---|---|---|
-| Jacob Farmer | Team Roster Scraping, Data Cleaning, Data Merge, Data Validation | https://jacobbfarmer2005.github.io/portfolio/ |
+| Jacob Farmer | Team Roster Scraping, Data Cleaning, Data Merge, Data Validation, Technical Overview | https://jacobbfarmer2005.github.io/portfolio/ |
 | Peter Franz | [ ] | https://franzp227.github.io/portfolio/ |
 | Dalton Kane | [ ] | https://djthork.github.io/portfolio/ |
 
